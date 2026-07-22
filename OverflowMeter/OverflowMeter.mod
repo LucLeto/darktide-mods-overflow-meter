@@ -13,5 +13,5 @@ return {
 		"dmf",
 	},
 	version = "1.0.0",
-	mod_id = "",
+	mod_id = "1095",
 }
