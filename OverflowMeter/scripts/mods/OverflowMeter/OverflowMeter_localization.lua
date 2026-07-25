@@ -4,6 +4,12 @@ if type(POWER_OVERFLOW) ~= "string" or POWER_OVERFLOW == "" or POWER_OVERFLOW:fi
     POWER_OVERFLOW = "Power Overflow"
 end
 
+local BORN_LEADER = Localize and Localize("loc_talent_veteran_allies_share_toughness")
+
+if type(BORN_LEADER) ~= "string" or BORN_LEADER == "" or BORN_LEADER:find("loc_talent", 1, true) then
+    BORN_LEADER = "Born Leader"
+end
+
 return {
     mod_name = {
         en = "Overflow Meter",
@@ -20,9 +26,9 @@ return {
         ["zh-tw"] = "Overflow Meter",
     },
     mod_description = {
-        en = "Estimates when and how effectively the Skitarii talent " .. POWER_OVERFLOW .. " shares Toughness with nearby teammates. Exact values are unavailable to multiplayer clients because the talent is processed by the server.",
+        en = "Estimates when and how effectively toughness-sharing talents - " .. POWER_OVERFLOW .. " (Skitarii) and " .. BORN_LEADER .. " (Veteran) - share Toughness with nearby teammates. Exact values are unavailable to multiplayer clients because these talents are processed by the server.",
         fr = "Estime quand et avec quelle efficacité le talent de Skitarii " .. POWER_OVERFLOW .. " partage de la Robustesse avec les coéquipiers proches. Les valeurs exactes ne sont pas accessibles aux clients multijoueurs, car le talent est traité par le serveur.",
-        de = "Schätzt, wann und wie effektiv das Skitarii-Talent " .. POWER_OVERFLOW .. " Zähigkeit mit Verbündeten in der Nähe teilt. Genaue Werte sind für Multiplayer-Clients nicht verfügbar, da das Talent serverseitig verarbeitet wird.",
+        de = "Schätzt, wann und wie effektiv zähigkeitsteilende Talente – " .. POWER_OVERFLOW .. " (Skitarii) und " .. BORN_LEADER .. " (Veteran) – Zähigkeit mit Verbündeten in der Nähe teilen. Genaue Werte sind für Multiplayer-Clients nicht verfügbar, da diese Talente serverseitig verarbeitet werden.",
         it = "Stima quando e con quale efficacia il talento Skitarii " .. POWER_OVERFLOW .. " condivide Resistenza con i compagni vicini. I valori esatti non sono disponibili ai client multigiocatore perché il talento viene elaborato dal server.",
         es = "Estima cuándo y con qué eficacia el talento de Skitarii " .. POWER_OVERFLOW .. " comparte Dureza con los compañeros cercanos. Los valores exactos no están disponibles para los clientes multijugador porque el talento se procesa en el servidor.",
         pl = "Szacuje, kiedy i jak skutecznie talent Skitariusa " .. POWER_OVERFLOW .. " przekazuje Wytrzymałość pobliskim członkom drużyny. Dokładne wartości są niedostępne dla klientów gry wieloosobowej, ponieważ talent jest przetwarzany przez serwer.",
@@ -48,9 +54,9 @@ return {
         ["zh-tw"] = POWER_OVERFLOW .. " 儀表",
     },
     overflow_meter_group_tooltip = {
-        en = "Shows an estimate of Toughness offered through " .. POWER_OVERFLOW .. ". Exact values are unavailable to multiplayer clients because the talent is processed by the server.",
+        en = "Shows an estimate of Toughness offered through " .. POWER_OVERFLOW .. " (Skitarii) or " .. BORN_LEADER .. " (Veteran). Exact values are unavailable to multiplayer clients because these talents are processed by the server.",
         fr = "Affiche une estimation de la Robustesse fournie par " .. POWER_OVERFLOW .. ". Les valeurs exactes ne sont pas accessibles aux clients multijoueurs, car le talent est traité par le serveur.",
-        de = "Zeigt eine Schätzung der durch " .. POWER_OVERFLOW .. " angebotenen Zähigkeit. Genaue Werte sind für Multiplayer-Clients nicht verfügbar, da das Talent serverseitig verarbeitet wird.",
+        de = "Zeigt eine Schätzung der durch " .. POWER_OVERFLOW .. " (Skitarii) oder " .. BORN_LEADER .. " (Veteran) angebotenen Zähigkeit. Genaue Werte sind für Multiplayer-Clients nicht verfügbar, da diese Talente serverseitig verarbeitet werden.",
         it = "Mostra una stima della Resistenza fornita tramite " .. POWER_OVERFLOW .. ". I valori esatti non sono disponibili ai client multigiocatore perché il talento viene elaborato dal server.",
         es = "Muestra una estimación de la Dureza proporcionada mediante " .. POWER_OVERFLOW .. ". Los valores exactos no están disponibles para los clientes multijugador porque el talento se procesa en el servidor.",
         pl = "Wyświetla szacowaną Wytrzymałość przekazywaną przez " .. POWER_OVERFLOW .. ". Dokładne wartości są niedostępne dla klientów gry wieloosobowej, ponieważ talent jest przetwarzany przez serwer.",
@@ -160,9 +166,9 @@ return {
         ["zh-tw"] = "顯示儀表標題",
     },
     show_title_tooltip = {
-        en = "Shows the " .. POWER_OVERFLOW .. " title above the meter. Disable for a more compact display.",
+        en = "Shows the talent name above the meter. Disable for a more compact display.",
         fr = "Affiche le titre " .. POWER_OVERFLOW .. " au-dessus de l'indicateur. Désactivez cette option pour un affichage plus compact.",
-        de = "Zeigt den " .. POWER_OVERFLOW .. "-Titel über der Anzeige. Für eine kompaktere Darstellung deaktivieren.",
+        de = "Zeigt den Talentnamen über der Anzeige. Für eine kompaktere Darstellung deaktivieren.",
         it = "Mostra il titolo " .. POWER_OVERFLOW .. " sopra l'indicatore. Disattiva per una visualizzazione più compatta.",
         es = "Muestra el título " .. POWER_OVERFLOW .. " encima del medidor. Desactívalo para una visualización más compacta.",
         pl = "Wyświetla tytuł " .. POWER_OVERFLOW .. " nad wskaźnikiem. Wyłącz, aby uzyskać bardziej zwarty widok.",
@@ -216,9 +222,9 @@ return {
         ["zh-tw"] = "速率顯示",
     },
     rate_mode_tooltip = {
-        en = "Total offered shows the sum provided to all allies in Coherency and scales with their number. Per ally shows what each single ally in Coherency receives, which stays the same regardless of how many are nearby, because " .. POWER_OVERFLOW .. " gives every ally the full share.",
+        en = "Total offered shows the sum provided to all allies in Coherency and scales with their number. Per ally shows what each single ally in Coherency receives, which stays the same regardless of how many are nearby, because the talent gives every ally the full share.",
         fr = "Total fourni affiche la somme donnée à tous les alliés en Cohésion et augmente avec leur nombre. Par allié affiche ce que reçoit chaque allié en Cohésion, une valeur qui reste identique quel que soit le nombre d'alliés proches, car " .. POWER_OVERFLOW .. " accorde la part complète à chacun.",
-        de = "Gesamt angeboten zeigt die Summe für alle Verbündeten in Kohärenz und skaliert mit deren Anzahl. Pro Verbündetem zeigt, was jeder einzelne Verbündete in Kohärenz erhält. Dieser Wert bleibt unabhängig von der Anzahl gleich, da " .. POWER_OVERFLOW .. " jedem Verbündeten den vollen Anteil gewährt.",
+        de = "Gesamt angeboten zeigt die Summe für alle Verbündeten in Kohärenz und skaliert mit deren Anzahl. Pro Verbündetem zeigt, was jeder einzelne Verbündete in Kohärenz erhält. Dieser Wert bleibt unabhängig von der Anzahl gleich, da das Talent jedem Verbündeten den vollen Anteil gewährt.",
         it = "Totale fornito mostra la somma assegnata a tutti gli alleati in Coesione e aumenta con il loro numero. Per alleato mostra quanto riceve ogni singolo alleato in Coesione, un valore che resta invariato indipendentemente dal numero di alleati vicini, perché " .. POWER_OVERFLOW .. " assegna a ciascun alleato la quota completa.",
         es = "Total ofrecido muestra la suma proporcionada a todos los aliados en Coherencia y aumenta con su número. Por aliado muestra lo que recibe cada aliado en Coherencia, un valor que no cambia sin importar cuántos haya cerca, porque " .. POWER_OVERFLOW .. " otorga la parte completa a cada aliado.",
         pl = "Łącznie przekazane pokazuje sumę otrzymywaną przez wszystkich sojuszników w Koherencji i rośnie wraz z ich liczbą. Na sojusznika pokazuje wartość otrzymywaną przez każdego pojedynczego sojusznika w Koherencji. Pozostaje ona taka sama niezależnie od liczby pobliskich sojuszników, ponieważ " .. POWER_OVERFLOW .. " przekazuje każdemu pełny udział.",
@@ -328,9 +334,9 @@ return {
         ["zh-tw"] = "顯示未啟用狀態",
     },
     show_inactive_state_tooltip = {
-        en = "Keeps the widget visible while you are below full Toughness. When disabled, the widget is hidden until " .. POWER_OVERFLOW .. " can activate.",
+        en = POWER_OVERFLOW .. " (Skitarii) only: keeps the widget visible while you are below full Toughness. When disabled, the widget is hidden until " .. POWER_OVERFLOW .. " can activate. " .. BORN_LEADER .. " has no inactive state, so this setting does not affect Veteran.",
         fr = "Maintient le widget visible tant que votre Robustesse n'est pas au maximum. Lorsque cette option est désactivée, le widget reste masqué jusqu'à ce que " .. POWER_OVERFLOW .. " puisse s'activer.",
-        de = "Hält das Widget sichtbar, während deine Zähigkeit nicht voll ist. Wenn deaktiviert, wird das Widget ausgeblendet, bis " .. POWER_OVERFLOW .. " aktiv werden kann.",
+        de = "Nur " .. POWER_OVERFLOW .. " (Skitarii): Hält das Widget sichtbar, während deine Zähigkeit nicht voll ist. Wenn deaktiviert, wird das Widget ausgeblendet, bis " .. POWER_OVERFLOW .. " aktiv werden kann. " .. BORN_LEADER .. " hat keinen inaktiven Zustand, daher wirkt sich diese Einstellung nicht auf den Veteranen aus.",
         it = "Mantiene visibile il widget quando la tua Resistenza non è al massimo. Se disattivato, il widget resta nascosto finché " .. POWER_OVERFLOW .. " non può attivarsi.",
         es = "Mantiene visible el widget mientras tu Dureza no esté al máximo. Si se desactiva, el widget permanece oculto hasta que " .. POWER_OVERFLOW .. " pueda activarse.",
         pl = "Utrzymuje widżet widoczny, gdy twoja Wytrzymałość nie jest pełna. Po wyłączeniu widżet pozostaje ukryty, dopóki " .. POWER_OVERFLOW .. " nie będzie mógł się aktywować.",
@@ -340,6 +346,34 @@ return {
         ko = "자신의 강인함이 가득 차지 않은 동안에도 위젯을 표시합니다. 비활성화하면 " .. POWER_OVERFLOW .. "가 활성화될 수 있을 때까지 위젯이 숨겨집니다.",
         ["zh-cn"] = "当你的韧性未满时仍保持组件可见。禁用后，组件会隐藏，直到 " .. POWER_OVERFLOW .. " 可以激活。",
         ["zh-tw"] = "當你的韌性未滿時仍保持介面元件可見。停用後，介面元件會隱藏，直到 " .. POWER_OVERFLOW .. " 可以啟用。",
+    },
+    show_tier_labels = {
+        en = "Show output tier labels",
+        fr = "Afficher les niveaux de rendement",
+        de = "Leistungsstufen anzeigen",
+        it = "Mostra i livelli di rendimento",
+        es = "Mostrar niveles de rendimiento",
+        pl = "Pokaż poziomy wydajności",
+        ["pt-br"] = "Mostrar níveis de rendimento",
+        ru = "Показывать уровни эффективности",
+        ja = "出力ティアラベルを表示",
+        ko = "출력 단계 라벨 표시",
+        ["zh-cn"] = "显示输出档位标签",
+        ["zh-tw"] = "顯示輸出級別標籤",
+    },
+    show_tier_labels_tooltip = {
+        en = "Adds a Low / Mid / High label to the sharing text, comparing the current estimated rate against your equipped build's sustained ceiling. Off by default.",
+        fr = "Ajoute une indication Faible / Moyen / Élevé au texte de partage en comparant le taux estimé actuel au taux maximal soutenu de votre configuration équipée. Désactivé par défaut.",
+        de = "Fügt dem Teilen-Text die Einstufung Niedrig / Mittel / Hoch hinzu. Dabei wird die aktuell geschätzte Rate mit der dauerhaft erreichbaren Obergrenze deines ausgerüsteten Builds verglichen. Standardmäßig deaktiviert.",
+        it = "Aggiunge un'indicazione Basso / Medio / Alto al testo della condivisione, confrontando il tasso stimato attuale con il limite massimo sostenibile della configurazione equipaggiata. Disattivato per impostazione predefinita.",
+        es = "Añade una indicación Bajo / Medio / Alto al texto de reparto, comparando la tasa estimada actual con el máximo sostenido de tu configuración equipada. Desactivado de forma predeterminada.",
+        pl = "Dodaje oznaczenie Niski / Średni / Wysoki do tekstu przekazywania, porównując bieżące szacowane tempo z trwałym maksimum używanego zestawu. Domyślnie wyłączone.",
+        ["pt-br"] = "Adiciona uma indicação Baixo / Médio / Alto ao texto de compartilhamento, comparando a taxa estimada atual com o limite sustentado da configuração equipada. Desativado por padrão.",
+        ru = "Добавляет к тексту передачи отметку «Низкий / Средний / Высокий», сравнивая текущую расчётную скорость с устойчивым максимумом используемого билда. По умолчанию отключено.",
+        ja = "共有テキストに「低 / 中 / 高」のラベルを追加し、現在の推定レートを装備中ビルドの持続可能な上限と比較します。デフォルトではオフです。",
+        ko = "공유 텍스트에 낮음 / 중간 / 높음 라벨을 추가하고, 현재 추정 속도를 장착한 빌드의 지속 가능한 최대치와 비교합니다. 기본값은 꺼짐입니다.",
+        ["zh-cn"] = "在分享文本中添加低 / 中 / 高标签，并将当前估算速率与已装备配装的持续输出上限进行比较。默认关闭。",
+        ["zh-tw"] = "在分享文字中新增低 / 中 / 高標籤，並將目前的估算速率與已裝備配置的持續輸出上限比較。預設關閉。",
     },
     rate_window = {
         en = "Rolling average duration (seconds)",
@@ -484,6 +518,66 @@ return {
     hud_title = {
         -- Already localized by the game; DMF falls back to en for all languages.
         en = POWER_OVERFLOW,
+    },
+    hud_title_veteran = {
+        -- Already localized by the game; DMF falls back to en for all languages.
+        en = BORN_LEADER,
+    },
+    tier_low = {
+        en = "Low",
+        fr = "Faible",
+        de = "Niedrig",
+        it = "Basso",
+        es = "Bajo",
+        pl = "Niski",
+        ["pt-br"] = "Baixo",
+        ru = "Низкий",
+        ja = "低",
+        ko = "낮음",
+        ["zh-cn"] = "低",
+        ["zh-tw"] = "低",
+    },
+    tier_mid = {
+        en = "Mid",
+        fr = "Moyen",
+        de = "Mittel",
+        it = "Medio",
+        es = "Medio",
+        pl = "Średni",
+        ["pt-br"] = "Médio",
+        ru = "Средний",
+        ja = "中",
+        ko = "중간",
+        ["zh-cn"] = "中",
+        ["zh-tw"] = "中",
+    },
+    tier_high = {
+        en = "High",
+        fr = "Élevé",
+        de = "Hoch",
+        it = "Alto",
+        es = "Alto",
+        pl = "Wysoki",
+        ["pt-br"] = "Alto",
+        ru = "Высокий",
+        ja = "高",
+        ko = "높음",
+        ["zh-cn"] = "高",
+        ["zh-tw"] = "高",
+    },
+    ctx_burst_share = {
+        en = "Shout: ~%d Toughness per ally",
+        fr = "Cri : ~%d de Robustesse par allié",
+        de = "Ruf: ~%d Zähigkeit pro Verbündetem",
+        it = "Grido: ~%d Resistenza per alleato",
+        es = "Grito: ~%d de Dureza por aliado",
+        pl = "Okrzyk: ~%d Wytrzymałości na sojusznika",
+        ["pt-br"] = "Grito: ~%d de Resistência por aliado",
+        ru = "Крик: ~%d Стойкости на союзника",
+        ja = "シャウト: 味方1人あたり ~%d タフネス",
+        ko = "외침: 아군당 ~%d 강인함",
+        ["zh-cn"] = "战吼：每名队友 ~%d 韧性",
+        ["zh-tw"] = "戰吼：每名隊友 ~%d 韌性",
     },
     state_inactive = {
         en = "Inactive",

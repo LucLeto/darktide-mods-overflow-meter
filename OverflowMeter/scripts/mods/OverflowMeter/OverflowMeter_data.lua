@@ -63,6 +63,12 @@ return {
                         tooltip = "show_inactive_state_tooltip"
                     },
                     {
+                        setting_id = "show_tier_labels",
+                        type = "checkbox",
+                        default_value = false,
+                        tooltip = "show_tier_labels_tooltip"
+                    },
+                    {
                         setting_id = "rate_window",
                         type = "numeric",
                         default_value = 2,

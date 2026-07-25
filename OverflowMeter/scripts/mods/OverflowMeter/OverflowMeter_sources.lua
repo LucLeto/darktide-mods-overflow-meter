@@ -42,9 +42,20 @@ local COMBAT_ABILITY_TYPE = "combat_ability"
 local TOUGHNESS_PER_CHARGE_BUFF_NAME = "cryptic_toughness_per_charge"
 local RANGED_STACKING_BUFF_NAME = "cryptic_ranged_stacking_toughness_stack"
 
-local PRECISION_STANCE_BUFF_NAMES = { "cryptic_precision_stance_one_charge", "cryptic_precision_stance_two_charges", "cryptic_precision_stance_three_charges" }
+local PRECISION_STANCE_BUFF_NAMES = {
+    "cryptic_precision_stance_one_charge",
+    "cryptic_precision_stance_two_charges",
+    "cryptic_precision_stance_three_charges"
+}
 
-local TEMPORARY_REGEN_BUFF_NAMES = { "cryptic_multi_hits_restore_toughness", "cryptic_crits_grant_tdr", "cryptic_elite_kills_toughness", "cryptic_electrocution_toughness", "cryptic_toughness_on_damage_taken", "cryptic_redline_toughness" }
+local TEMPORARY_REGEN_BUFF_NAMES = {
+    "cryptic_multi_hits_restore_toughness",
+    "cryptic_crits_grant_tdr",
+    "cryptic_elite_kills_toughness",
+    "cryptic_electrocution_toughness",
+    "cryptic_toughness_on_damage_taken",
+    "cryptic_redline_toughness"
+}
 
 local relevant_buff_names = {}
 
@@ -72,7 +83,11 @@ local WEAPON_TOUGHNESS_PROC_TEMPLATES = {
     weapon_trait_bespoke_bespoke_powersword_p2_regain_toughness_on_multiple_hits_by_weapon_special = true
 }
 
-local CONTINUOUS_FIRE_TEMPLATES = { weapon_trait_bespoke_arc_rifle_p1_toughness_on_continuous_fire = true, weapon_trait_bespoke_autogun_p2_toughness_on_continuous_fire = true, weapon_trait_bespoke_autopistol_p1_toughness_on_continuous_fire = true }
+local CONTINUOUS_FIRE_TEMPLATES = {
+    weapon_trait_bespoke_arc_rifle_p1_toughness_on_continuous_fire = true,
+    weapon_trait_bespoke_autogun_p2_toughness_on_continuous_fire = true,
+    weapon_trait_bespoke_autopistol_p1_toughness_on_continuous_fire = true
+}
 
 local function _find_precision_stance_buff(buffs_by_name)
     for i = 1, #PRECISION_STANCE_BUFF_NAMES do
@@ -293,9 +308,17 @@ local temporary_regeneration = {
     end
 }
 
-local adapters = { precision_stance, toughness_per_charge, ranged_kill_regeneration, temporary_regeneration }
+local adapters = {
+    precision_stance,
+    toughness_per_charge,
+    ranged_kill_regeneration,
+    temporary_regeneration
+}
 
 return {
+    continuous_when_full = true,
+    has_inactive_state = true,
+
     share_fraction = share_fraction,
     relevant_buff_names = relevant_buff_names,
     adapters = adapters,
