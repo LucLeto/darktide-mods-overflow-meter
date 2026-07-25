@@ -3,8 +3,6 @@ local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 local Estimator = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_estimator")
 local Geometry = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_gauge_geometry")
-local Sources = mod._sources
-local Pulses = mod._pulses
 
 local Color = Color
 local ScriptUnit = ScriptUnit
@@ -23,14 +21,33 @@ local GUARD_INTERVAL = 1
 local SAMPLE_INTERVAL = 0.25
 local FULL_TOUGHNESS_EPSILON = 0.999
 local MISSING_TOUGHNESS_EPSILON = 0.5
-local ARCHETYPE_NAME = "cryptic"
-local TALENT_NAME = "cryptic_shared_toughness"
+local ARCHETYPE_VETERAN = "veteran"
+
+local ARCHETYPES = {
+    cryptic = {
+        talent_buff = "cryptic_shared_toughness",
+        talent_id = "cryptic_shared_toughness",
+        title_key = "hud_title"
+    },
+    veteran = {
+        talent_buff = "veteran_share_toughness_gained",
+        talent_id = "veteran_allies_in_coherency_share_toughness_gain",
+        title_key = "hud_title_veteran"
+    },
+}
+
+local BURST_FLASH_SAMPLES = 5
 
 local STATE_INACTIVE = Estimator.STATE_INACTIVE
 local STATE_READY = Estimator.STATE_READY
 local STATE_SHARING_USEFUL = Estimator.STATE_SHARING_USEFUL
 local STATE_SHARING_NO_DEMAND = Estimator.STATE_SHARING_NO_DEMAND
 local DISPLAY_STATE_SHARING_GENERIC = "sharing_generic"
+local TIER_LOC_KEYS = {
+    [Estimator.TIER_LOW] = "tier_low",
+    [Estimator.TIER_MID] = "tier_mid",
+    [Estimator.TIER_HIGH] = "tier_high"
+}
 
 local METER_STYLE_GAUGE = "gauge"
 local METER_STYLE_TEXT = "text"
@@ -241,6 +258,13 @@ HudElementOverflowMeter.init = function (self, parent, draw_layer, start_scale)
     self._ctx = { buffs_by_name = {} }
     self._loc = {}
     self._supported = false
+    self._archetype = nil
+    self._sources = nil
+    self._pulses = nil
+    self._last_toughness_damage = nil
+    self._last_max_toughness = nil
+    self._burst_flash_remaining = 0
+    self._burst_flash_amount = 0
     self._guard_timer = 0
     self._sample_timer = 0
     self._opacity = 1
@@ -257,6 +281,9 @@ HudElementOverflowMeter._clear_render_cache = function (self)
     self._last_rate_str = nil
     self._last_allies = nil
     self._last_allies_missing = nil
+    self._last_tier = nil
+    self._last_burst_active = nil
+    self._last_burst_amount = nil
     self._last_state_text = nil
     self._last_context_text = nil
     self._last_lit = nil
@@ -280,6 +307,9 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
         mod._reset_requested = false
 
         self._estimator:reset()
+
+        self._last_toughness_damage = nil
+        self._burst_flash_remaining = 0
 
         self._guard_timer = 0
         self._force_refresh = true
@@ -397,7 +427,10 @@ HudElementOverflowMeter._check_supported = function (self, settings)
         return false
     end
 
-    if not player.archetype_name or player:archetype_name() ~= ARCHETYPE_NAME then
+    local archetype = player.archetype_name and player:archetype_name()
+    local archetype_config = archetype and ARCHETYPES[archetype]
+
+    if not archetype_config then
         return false
     end
 
@@ -405,7 +438,7 @@ HudElementOverflowMeter._check_supported = function (self, settings)
     local has_talent = false
 
     if talent_extension and talent_extension.buff_template_tier then
-        local tier = talent_extension:buff_template_tier(TALENT_NAME)
+        local tier = talent_extension:buff_template_tier(archetype_config.talent_buff)
 
         has_talent = tier ~= nil and tier ~= 0
     end
@@ -413,7 +446,7 @@ HudElementOverflowMeter._check_supported = function (self, settings)
     if not has_talent and player.profile then
         local profile = player:profile()
         local talents = profile and profile.talents
-        local points = talents and talents[TALENT_NAME]
+        local points = talents and talents[archetype_config.talent_id]
 
         has_talent = points ~= nil and points ~= 0
     end
@@ -429,6 +462,8 @@ HudElementOverflowMeter._check_supported = function (self, settings)
         return false
     end
 
+    self:_set_archetype(archetype)
+
     local ctx = self._ctx
 
     ctx.unit = player_unit
@@ -438,65 +473,44 @@ HudElementOverflowMeter._check_supported = function (self, settings)
     ctx.ability_extension = ScriptUnit.has_extension(player_unit, "ability_system")
     ctx.coherency_extension = ScriptUnit.has_extension(player_unit, "coherency_system")
 
-    Pulses.set_context(player_unit, buff_extension, toughness_extension, talent_extension)
+    self._pulses.set_context(player_unit, buff_extension, toughness_extension, talent_extension)
 
     return true
 end
 
-HudElementOverflowMeter._sample = function (self)
-    local ctx = self._ctx
-    local buffs_by_name = ctx.buffs_by_name
-
-    table_clear(buffs_by_name)
-
-    local buff_extension = ctx.buff_extension
-    local relevant_buff_names = Sources.relevant_buff_names
-    local buffs = buff_extension.buffs and buff_extension:buffs()
-
-    if buffs then
-        for i = 1, #buffs do
-            local buff_instance = buffs[i]
-            local template = buff_instance.template and buff_instance:template()
-            local template_name = template and template.name
-
-            if template_name and relevant_buff_names[template_name] then
-                buffs_by_name[template_name] = buff_instance
-            end
-        end
+HudElementOverflowMeter._set_archetype = function (self, archetype)
+    if self._archetype == archetype then
+        return
     end
 
-    local toughness_extension = ctx.toughness_extension
-    local max_toughness = toughness_extension:max_toughness()
-    local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
-    local adapters = Sources.adapters
-    local total_rate = 0
+    mod._disable_all_pulses()
 
-    for i = 1, #adapters do
-        local adapter = adapters[i]
+    self._archetype = archetype
+    self._sources = mod._sources_by_archetype[archetype]
+    self._pulses = mod._pulses_by_archetype[archetype]
+    self._last_toughness_damage = nil
+    self._burst_flash_remaining = 0
 
-        if adapter.is_active(ctx) then
-            total_rate = total_rate + adapter.estimate_per_second(ctx)
-        end
-    end
+    local sources = self._sources
 
-    local replenish_multiplier = 1
-    local stat_buffs = buff_extension.stat_buffs and buff_extension:stat_buffs()
+    self._estimator:set_mode(sources.continuous_when_full, sources.has_inactive_state)
 
-    if stat_buffs then
-        replenish_multiplier = (stat_buffs.toughness_replenish_modifier or 1) * (stat_buffs.toughness_replenish_multiplier or 1)
-    end
+    self:_refresh_localization()
+    self:_clear_render_cache()
 
-    local share_per_ally_per_second = total_rate > 0 and total_rate * max_toughness * replenish_multiplier * Sources.share_fraction or 0
+    self._force_refresh = true
+end
 
+HudElementOverflowMeter._count_allies = function (self)
     local allies = 0
     local allies_missing = 0
-    local coherency_extension = ctx.coherency_extension
+    local coherency_extension = self._ctx.coherency_extension
 
     if coherency_extension and coherency_extension.in_coherence_units then
         local units_in_coherency = coherency_extension:in_coherence_units()
 
         if units_in_coherency then
-            local player_unit = ctx.unit
+            local player_unit = self._ctx.unit
             local alive_units = ALIVE
 
             for coherency_unit in pairs(units_in_coherency) do
@@ -515,6 +529,63 @@ HudElementOverflowMeter._sample = function (self)
         end
     end
 
+    return allies, allies_missing
+end
+
+HudElementOverflowMeter._sample = function (self)
+    if self._archetype == ARCHETYPE_VETERAN then
+        self:_sample_veteran()
+
+        return
+    end
+
+    local ctx = self._ctx
+    local sources = self._sources
+    local pulses = self._pulses
+    local buffs_by_name = ctx.buffs_by_name
+
+    table_clear(buffs_by_name)
+
+    local buff_extension = ctx.buff_extension
+    local relevant_buff_names = sources.relevant_buff_names
+    local buffs = buff_extension.buffs and buff_extension:buffs()
+
+    if buffs then
+        for i = 1, #buffs do
+            local buff_instance = buffs[i]
+            local template = buff_instance.template and buff_instance:template()
+            local template_name = template and template.name
+
+            if template_name and relevant_buff_names[template_name] then
+                buffs_by_name[template_name] = buff_instance
+            end
+        end
+    end
+
+    local toughness_extension = ctx.toughness_extension
+    local max_toughness = toughness_extension:max_toughness()
+    local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
+    local adapters = sources.adapters
+    local total_rate = 0
+
+    for i = 1, #adapters do
+        local adapter = adapters[i]
+
+        if adapter.is_active(ctx) then
+            total_rate = total_rate + adapter.estimate_per_second(ctx)
+        end
+    end
+
+    local replenish_multiplier = 1
+    local stat_buffs = buff_extension.stat_buffs and buff_extension:stat_buffs()
+
+    if stat_buffs then
+        replenish_multiplier = (stat_buffs.toughness_replenish_modifier or 1) * (stat_buffs.toughness_replenish_multiplier or 1)
+    end
+
+    local share_per_ally_per_second = total_rate > 0 and total_rate * max_toughness * replenish_multiplier * sources.share_fraction or 0
+
+    local allies, allies_missing = self:_count_allies()
     local ally_multiplier
 
     if self._rate_mode_total then
@@ -523,16 +594,96 @@ HudElementOverflowMeter._sample = function (self)
         ally_multiplier = allies > 0 and 1 or 0
     end
 
-    local pending_pulse_fraction = Pulses.consume()
+    local pending_pulse_fraction = pulses.consume()
     local pulse_offered_per_second = 0
 
     if pending_pulse_fraction > 0 and allies > 0 then
-        pulse_offered_per_second = pending_pulse_fraction * max_toughness * Sources.share_fraction * ally_multiplier / SAMPLE_INTERVAL
+        pulse_offered_per_second = pending_pulse_fraction * max_toughness * sources.share_fraction * ally_multiplier / SAMPLE_INTERVAL
     end
 
-    local nominal_ceiling = Sources.available_max_fraction(ctx) * max_toughness * Sources.share_fraction * ally_multiplier
+    local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * sources.share_fraction * ally_multiplier
 
     self._estimator:sample(is_full, total_rate > 0, share_per_ally_per_second * ally_multiplier, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+end
+
+HudElementOverflowMeter._sample_veteran = function (self)
+    local ctx = self._ctx
+    local sources = self._sources
+    local pulses = self._pulses
+    local toughness_extension = ctx.toughness_extension
+    local buff_extension = ctx.buff_extension
+    local max_toughness = toughness_extension:max_toughness()
+    local toughness_damage = toughness_extension:toughness_damage()
+    local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
+    local share_fraction = sources.share_fraction
+
+    local last_damage = self._last_toughness_damage
+    local bar_gain = 0
+
+    if last_damage and self._last_max_toughness == max_toughness then
+        local recovered = last_damage - toughness_damage
+
+        if recovered > 0 then
+            bar_gain = recovered
+        end
+    end
+
+    self._last_toughness_damage = toughness_damage
+    self._last_max_toughness = max_toughness
+
+    local allies, allies_missing = self:_count_allies()
+    local ally_multiplier
+
+    if self._rate_mode_total then
+        ally_multiplier = allies
+    else
+        ally_multiplier = allies > 0 and 1 or 0
+    end
+
+    local continuous_offered_per_second = 0
+
+    if bar_gain > 0 and allies > 0 then
+        continuous_offered_per_second = share_fraction * bar_gain * ally_multiplier / SAMPLE_INTERVAL
+    end
+
+    local pending_excess = pulses.consume()
+    local pulse_offered_per_second = 0
+
+    if pending_excess > 0 and allies > 0 then
+        pulse_offered_per_second = share_fraction * pending_excess * ally_multiplier / SAMPLE_INTERVAL
+    end
+
+    if is_full and allies > 0 then
+        local continuous_fraction = pulses.active_continuous_fraction()
+
+        if continuous_fraction > 0 then
+            local replenish_multiplier = 1
+            local stat_buffs = buff_extension.stat_buffs and buff_extension:stat_buffs()
+
+            if stat_buffs then
+                replenish_multiplier = (stat_buffs.toughness_replenish_modifier or 1) * (stat_buffs.toughness_replenish_multiplier or 1)
+            end
+
+            pulse_offered_per_second = pulse_offered_per_second + share_fraction * continuous_fraction * max_toughness * replenish_multiplier * ally_multiplier
+        end
+    end
+
+    local burst_share = pulses.consume_burst()
+
+    if burst_share > 0 then
+        if allies > 0 then
+            self._estimator:register_burst(burst_share * ally_multiplier / SAMPLE_INTERVAL)
+        end
+
+        self._burst_flash_amount = burst_share
+        self._burst_flash_remaining = BURST_FLASH_SAMPLES
+    elseif self._burst_flash_remaining > 0 then
+        self._burst_flash_remaining = self._burst_flash_remaining - 1
+    end
+
+    local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * share_fraction * ally_multiplier
+
+    self._estimator:sample(is_full, bar_gain > 0, continuous_offered_per_second, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
 end
 
 HudElementOverflowMeter._display_state = function (self, settings)
@@ -658,8 +809,11 @@ HudElementOverflowMeter._refresh_text = function (self, settings, display_state)
     local allies = estimator.allies
     local allies_missing = estimator.allies_missing
     local rate_str = settings.show_rate and string_format("%.1f", estimator.display_rate) or ""
+    local tier = (settings.show_tier_labels and self._archetype ~= nil) and estimator.tier or 0
+    local burst_active = (self._burst_flash_remaining or 0) > 0
+    local burst_amount = burst_active and math_floor(self._burst_flash_amount + 0.5) or 0
 
-    if not self._force_refresh and display_state == self._last_display_state and rate_str == self._last_rate_str and allies == self._last_allies and allies_missing == self._last_allies_missing then
+    if not self._force_refresh and display_state == self._last_display_state and rate_str == self._last_rate_str and allies == self._last_allies and allies_missing == self._last_allies_missing and tier == self._last_tier and burst_active == self._last_burst_active and burst_amount == self._last_burst_amount then
         return false
     end
 
@@ -667,10 +821,14 @@ HudElementOverflowMeter._refresh_text = function (self, settings, display_state)
     self._last_rate_str = rate_str
     self._last_allies = allies
     self._last_allies_missing = allies_missing
+    self._last_tier = tier
+    self._last_burst_active = burst_active
+    self._last_burst_amount = burst_amount
 
     local loc = self._loc
     local content = self._widgets_by_name.meter.content
     local state_text, context_text
+    local sharing = false
 
     local rate_key_suffix = self._rate_mode_total and "" or "_per_ally"
 
@@ -683,12 +841,27 @@ HudElementOverflowMeter._refresh_text = function (self, settings, display_state)
     elseif display_state == STATE_SHARING_USEFUL then
         state_text = self:_rate_state_text(loc.state_useful, "state_useful_rate" .. rate_key_suffix, rate_str, settings)
         context_text = mod:localize(allies_missing == 1 and "ctx_needs_one" or "ctx_needs_many", allies_missing)
+        sharing = true
     elseif display_state == STATE_SHARING_NO_DEMAND then
         state_text = self:_rate_state_text(loc.state_sharing, "state_sharing_rate" .. rate_key_suffix, rate_str, settings)
         context_text = loc.ctx_no_demand
+        sharing = true
     else
         state_text = self:_rate_state_text(loc.state_sharing, "state_sharing_rate" .. rate_key_suffix, rate_str, settings)
         context_text = self:_allies_context_text(allies, settings)
+        sharing = true
+    end
+
+    if tier ~= 0 and sharing then
+        local tier_text = loc.tier[tier]
+
+        if tier_text then
+            state_text = state_text .. " · " .. tier_text
+        end
+    end
+
+    if burst_active then
+        context_text = mod:localize("ctx_burst_share", burst_amount)
     end
 
     local dirty = false
@@ -726,7 +899,10 @@ end
 
 HudElementOverflowMeter._reset_display = function (self)
     self._estimator:reset()
-    Pulses.disable()
+    mod._disable_all_pulses()
+
+    self._last_toughness_damage = nil
+    self._burst_flash_remaining = 0
 
     self:_clear_render_cache()
 
@@ -856,7 +1032,15 @@ HudElementOverflowMeter._refresh_localization = function (self)
     loc.ctx_no_demand = mod:localize("ctx_no_demand")
     loc.unit_toughness_per_second = mod:localize("unit_toughness_per_second")
 
-    self._widgets_by_name.meter.content.title = mod:localize("hud_title")
+    loc.tier = loc.tier or {}
+    loc.tier[Estimator.TIER_LOW] = mod:localize(TIER_LOC_KEYS[Estimator.TIER_LOW])
+    loc.tier[Estimator.TIER_MID] = mod:localize(TIER_LOC_KEYS[Estimator.TIER_MID])
+    loc.tier[Estimator.TIER_HIGH] = mod:localize(TIER_LOC_KEYS[Estimator.TIER_HIGH])
+
+    local archetype_config = self._archetype and ARCHETYPES[self._archetype]
+    local title_key = archetype_config and archetype_config.title_key or "hud_title"
+
+    self._widgets_by_name.meter.content.title = mod:localize(title_key)
 end
 
 return HudElementOverflowMeter
