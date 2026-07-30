@@ -1,5 +1,7 @@
 local mod = get_mod("OverflowMeter")
 
+mod.version = "1.3.0"
+
 local math_floor = math.floor
 
 local settings = {
@@ -24,7 +26,8 @@ local settings = {
     scoreboard_row_overflowed = true,
     scoreboard_row_shared = true,
     scoreboard_row_efficiency = true,
-    summary_chat_on_end = true
+    summary_chat_on_end = true,
+    share_mission_summary = true
 }
 
 local SETTING_IDS = {
@@ -49,7 +52,8 @@ local SETTING_IDS = {
     "scoreboard_row_overflowed",
     "scoreboard_row_shared",
     "scoreboard_row_efficiency",
-    "summary_chat_on_end"
+    "summary_chat_on_end",
+    "share_mission_summary"
 }
 
 mod._settings = settings
@@ -75,6 +79,8 @@ refresh_settings()
 
 mod.on_setting_changed = function ()
     refresh_settings()
+
+    mod._share.refresh()
 end
 
 mod._stats = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_stats")
@@ -92,6 +98,8 @@ mod._pulses_by_archetype = {
     cryptic = mod._pulses,
     veteran = mod._pulses_veteran
 }
+
+mod._share = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_share")
 
 mod:hook_safe(CLASS.PlayerUnitBuffExtension, "_set_proc_active_start_time", function (self, index, activation_time, skip_send_active_time_rpc)
     local pulses = mod._pulses
@@ -141,6 +149,7 @@ mod.on_game_state_changed = function (status, state_name)
             mod._summary_echoed = false
 
             mod._stats.reset()
+            mod._share.reset()
         end
 
         disable_all_pulses()
@@ -175,7 +184,17 @@ end
 
 mod:hook_safe("EndView", "on_enter", function ()
     echo_mission_summary()
+
+    mod._share.push_peers()
 end)
+
+mod.on_all_mods_loaded = function ()
+    mod._share.setup()
+end
+
+mod.update = function (dt)
+    mod._share.update(dt)
+end
 
 mod.on_enabled = function ()
     refresh_settings()
@@ -183,6 +202,7 @@ mod.on_enabled = function ()
     mod._reset_requested = true
 
     mod._stats.reset()
+    mod._share.refresh()
 end
 
 mod.on_disabled = function ()
@@ -190,8 +210,13 @@ mod.on_disabled = function ()
     mod._summary_held = false
 
     mod._stats.reset()
+    mod._share.teardown()
 
     disable_all_pulses()
+end
+
+mod.on_unload = function ()
+    mod._share.teardown()
 end
 
 mod.hold_mission_summary = function (is_pressed)

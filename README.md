@@ -74,6 +74,21 @@ Two behaviours worth knowing:
   Scoreboard has no ordering field, so this is done by moving the registered row entries, anchored on a named Ovenproof spacer row. If that row is ever renamed or removed the repositioning is skipped and the rows simply stay where they were.
 * **Scoreboard's panel is capped at 1000 px** (`Scoreboard panel height`, whose maximum *is* its default). Past that the frame stops growing while rows keep drawing, so they spill over the bottom border and the overflowing rows get progressively indented. Adding these five rows costs roughly 126 px, including the *Defense Score* row that the Defence group only generates once it has at least one visible row. If your scoreboard already overflows, the cheapest space to reclaim is elsewhere: Ovenproof's plugin has a `bottom_padding` option gating four blank spacer rows (~72 px, no information lost), and its per-tier options each gate a large block of rows. Otherwise, untick the rows here you can do without - *Generated* is simply Replenished + Overflowed, and *Efficiency* is their ratio.
 
+### Shared mission summary (optional)
+
+On its own the Scoreboard integration can only ever fill **your** column - every other column reads zero, even for a teammate who is running this mod with a sharing talent equipped. Power Overflow and Born Leader are processed entirely by the server, so no client can observe another player's replenishment. But every client can compute its own totals, and those totals can be replicated between clients.
+
+Each client therefore publishes its own mission totals, and every other client running the mod fills in that player's Scoreboard column from the published values. No extra mod is needed - the totals travel as an Immaterium presence key-value, the same backend-relayed channel the game itself uses for `havoc_status` and the serialized character profile. Controlled by `Share mission summary` (on by default).
+
+What this does and does not do:
+
+* **Both players need Overflow Meter.** A teammate's column is only filled if they run the mod too. Players without it publish nothing, and their column behaves exactly as it does today.
+* **This does not make any number more accurate.** The server reports the shared amount to nobody - including the sharing player's own client - so a teammate's published figures are their client's estimate, produced by the same inference code with the same error bars described under [Limitations](#limitations). The `~` markers apply to every column, not just yours.
+* **Only players who queued together as a party are reached.** Presence replicates across the Immaterium *party*, which is not the same set as the players in your mission. In quickplay with strangers there is nobody to exchange with, and the board looks exactly as it does without this feature.
+* **Only mission statistics are published**, in a payload of about 75 bytes. Presence is readable by any account holding a member's account id, so nothing else is ever put on it. The mod never publishes a value over 250 bytes, because the backend rejects any presence value above 256 and responds by dropping the whole presence stream.
+
+Turning `Share mission summary` off clears the published value; you will still read and display the totals of teammates who share theirs.
+
 ## Skitarii (Power Overflow) replenishment sources
 
 Complete reference of Skitarius Toughness replenishment. Any replenishment that lands while at full Toughness feeds Power Overflow, with two exceptions: coherency regeneration (disabled at 100 % Toughness, so it can never overflow) and effects that restore Toughness directly to allies. Data and icons from kuli's guides (see [Credits & Sources](#credits--sources)).
@@ -193,7 +208,7 @@ Because these two paths are mutually exclusive - the bar delta below full, the m
 
 `Power Overflow Meter` group: meter style (Gauge / Text / Both), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To turn the meter off entirely, disable the mod through the standard mod toggle.
 
-`Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per Scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
+`Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per Scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default), publishing your totals to teammates running the mod (on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
 
 ## Custom HUD support (optional)
 
@@ -232,6 +247,7 @@ The summary inherits all of the above, plus:
 * `Shared` is what the talent *offers*. The server does not tell clients how much each ally actually received, and per-ally delivery is out of scope.
 * **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line and the Scoreboard rows are the two supported ways to see the totals on that screen.
 * The chat line depends on DMF's own `echo` output mode. If you have set DMF to route echoes to the log only, the message will not appear in chat.
+* **A teammate's shared column is their estimate, not a measurement.** It carries every limitation above, produced independently on their machine. It is there for attribution and comparison, not precision.
 
 ## Credits & Sources
 
