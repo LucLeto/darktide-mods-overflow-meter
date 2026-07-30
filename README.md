@@ -32,6 +32,48 @@ With `Show output tier labels` enabled (off by default), the sharing text also c
 
 All displayed rates are marked with `~` because they are estimates.
 
+## Mission summary
+
+Next to the live meter the mod keeps per-mission totals, answering how much of your Toughness generation was actually useful and how much was thrown away against your Toughness cap. The panel is shown while a key is **held** - the keybind is unbound by default, so assign one under `Show summary (hold)` - or permanently via `Always show the summary`.
+
+Binding it to `TAB` pairs it with the game's own Tactical Overlay, so both appear together. The panel therefore defaults to the **bottom right**, clear of the Tactical Overlay's left panel (which spans x 25-625 at full height) and of its right-hand content - move it with `Summary position X / Y` if your HUD is laid out differently.
+
+| Metric | Meaning |
+| --- | --- |
+| Generated | Total Toughness your tracked sources asked to restore, before clamping (`Replenished + Overflowed`). |
+| Replenished | Toughness that actually filled your bar. |
+| Overflowed | Toughness that could not restore you because you were already at, or reached, your current maximum. |
+| Shared | Toughness offered to allies through Power Overflow or Born Leader. Follows the `Rate display` setting, so it is either the total across all allies in Coherency or the amount each single ally receives. |
+| Efficiency | Share efficiency: of all the Toughness the talent *could* have offered, the percentage that actually reached an ally. Replenishing with nobody in Coherency drives it down. Ally count deliberately does not matter, because both talents give every ally the full share rather than splitting it - one ally in Coherency is 100 %, none is 0 %. |
+
+**Only `Replenished` is observed**, read from your own replicated Toughness bar. Everything else is inferred and is therefore prefixed with `~`, the same estimate marker the live meter uses.
+
+The totals reset when you enter a new mission and keep accumulating whether or not the panel is shown, so you can check them at any point - including after going down, when the meter itself has already stopped.
+
+The current maximum Toughness is used throughout, so temporary increases such as Veteran's *Duty and Honour* or a Zealot's *Chorus* raise the cap that overflow is measured against, exactly as they do in game.
+
+### At the end of a mission
+
+The game destroys the whole HUD during mission teardown, before the end-of-round screen opens, so the panel cannot follow you there. Two things can:
+
+* **A chat line** (`Post the summary to chat at mission end`, on by default). When the end-of-round screen opens, the totals are written as a single `mod:echo` line. Chat is one of the few UI layers that stays alive on that screen, so the message is readable there and remains in your chat history.
+* **Scoreboard rows**, described next.
+
+The two are independent - run either, or both.
+
+### Scoreboard support (optional)
+
+When the [Scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/22) mod is installed, all five metrics are registered as rows through its plugin API, in Scoreboard's *Defence* group. They appear both in Scoreboard's Tactical Overlay panel and, more usefully, **on the end-of-mission screen**, which the mod's own panel cannot reach (see below). Each row has its own checkbox in the `Mission summary` settings group, so you can show only the ones you care about; without Scoreboard installed the settings do nothing.
+
+Two behaviours worth knowing:
+
+* **All rows rank "higher is better."** Teammates without a sharing talent always score zero, so ranking *Overflowed* as "lower is better" would grey out the only player the row actually applies to.
+* **Efficiency is written differently from the other rows.** Every numeric row type in Scoreboard accumulates, which would make a percentage ratchet upwards instead of showing its current value. Its cell is therefore replaced on each update rather than pushed through `update_stat` - the same approach Ovenproof's plugin uses for its Weakspot and Critical Rate rows. It displays as a plain number, with the unit in the row label.
+* **Placement adapts to [Ovenproof's Scoreboard Plugin](https://www.nexusmods.com/warhammer40kdarktide/mods/514).** That plugin rebuilds the board into a single group of its own, which would otherwise leave these rows stranded in an empty *Defence* group above everything else. When it is detected, the rows are moved into its list directly after *Total [Times Killed | Players Rescued]* and adopt its group. Without it they stay in Scoreboard's *Defence* group and feed its auto-generated **Defense Score** as normal.
+
+  Scoreboard has no ordering field, so this is done by moving the registered row entries, anchored on a named Ovenproof spacer row. If that row is ever renamed or removed the repositioning is skipped and the rows simply stay where they were.
+* **Scoreboard's panel is capped at 1000 px** (`Scoreboard panel height`, whose maximum *is* its default). Past that the frame stops growing while rows keep drawing, so they spill over the bottom border and the overflowing rows get progressively indented. Adding these five rows costs roughly 126 px, including the *Defense Score* row that the Defence group only generates once it has at least one visible row. If your scoreboard already overflows, the cheapest space to reclaim is elsewhere: Ovenproof's plugin has a `bottom_padding` option gating four blank spacer rows (~72 px, no information lost), and its per-tier options each gate a large block of rows. Otherwise, untick the rows here you can do without - *Generated* is simply Replenished + Overflowed, and *Efficiency* is their ratio.
+
 ## Skitarii (Power Overflow) replenishment sources
 
 Complete reference of Skitarius Toughness replenishment. Any replenishment that lands while at full Toughness feeds Power Overflow, with two exceptions: coherency regeneration (disabled at 100 % Toughness, so it can never overflow) and effects that restore Toughness directly to allies. Data and icons from kuli's guides (see [Credits & Sources](#credits--sources)).
@@ -151,13 +193,17 @@ Because these two paths are mutually exclusive - the bar delta below full, the m
 
 `Power Overflow Meter` group: meter style (Gauge / Text / Both), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To turn the meter off entirely, disable the mod through the standard mod toggle.
 
+`Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per Scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
+
 ## Custom HUD support (optional)
 
 When the [Custom HUD](https://www.nexusmods.com/warhammer40kdarktide/mods/10) mod is installed, the meter integrates with it automatically - no configuration needed:
 
-* **Move** the meter in Custom HUD's edit mode; once it has been moved there, the mod's own position settings stop being applied so the two never fight.
-* **Resize** the meter through Custom HUD (drag handle or width field); a size set there takes precedence over the mod's meter-size setting until the node is reset in Custom HUD.
-* Custom HUD's hide and opacity controls work on the meter as on any other HUD element.
+The meter and the mission summary panel appear as **two independent boxes** in Custom HUD's edit mode, so they can be placed and sized separately.
+
+* **Move** either one in Custom HUD's edit mode; once a box has been moved there, the mod's own position setting for it stops being applied so the two never fight.
+* **Resize** either one through Custom HUD (drag handle or width field); a size set there takes precedence over the mod's meter-size setting until that box is reset in Custom HUD.
+* **Hide and opacity are per element, not per box.** Custom HUD applies them to the whole HUD element, so hiding either box hides the meter *and* the summary together. To show only one of them, use the mod's own settings - clear the summary keybind and leave `Always show the summary` off, or pick a meter style you want.
 
 Without Custom HUD everything behaves exactly as before - the integration is read-only and never requires the mod.
 
@@ -174,6 +220,18 @@ Power Overflow and Born Leader are processed by the server, and multiplayer clie
 * Kill- and hit-based pulses are inferred from local attack reports and can differ slightly from the server's proc order (for example an explosion hit that kills its target).
 * *(Born Leader)* The continuous regeneration counted while at full Toughness is modelled from talent selection and timers rather than read from the server's buffs, so its active windows are approximations. In particular, Catch a Breath's cooldown is restarted from melee hits that land on you; **blocking** an attack also restarts it in game but is not observable client-side, so the meter can credit a little regeneration that the server did not grant.
 * *(Born Leader)* Field Improvisation's 1 %/s near a deployed Medi-Pack is not counted while at full Toughness (no reliable client-side proximity signal), and Duty and Honour's +50 bonus Toughness is excluded by design because it raises maximum Toughness rather than replenishing it.
+
+### Mission summary
+
+The summary inherits all of the above, plus:
+
+* **`Replenished` is sampled, not integrated.** The Toughness bar is read four times a second, so a gain that is immediately cancelled by incoming damage inside the same 250 ms window is netted out and slightly under-counted.
+* **`Overflowed` reads the replicated bar at trigger time.** When several pulses land in quick succession the client may still see the pre-pulse missing Toughness for the later ones, which under-counts their clamp excess.
+* *(Power Overflow)* Toughness wasted while **below** full counts as `Overflowed` but never as `Shared`: the talent only procs when the replenishment restored nothing at all, so a partial clamp is wasted without being shared. Expect `Shared` to be well under 25 % of `Generated`.
+* *(Born Leader)* When Duty and Honour raises maximum Toughness in the same instant Voice of Command restores it, that one bar-delta sample is skipped by the max-change guard, so `Replenished` misses that shout's restored portion.
+* `Shared` is what the talent *offers*. The server does not tell clients how much each ally actually received, and per-ally delivery is out of scope.
+* **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line and the Scoreboard rows are the two supported ways to see the totals on that screen.
+* The chat line depends on DMF's own `echo` output mode. If you have set DMF to route echoes to the log only, the message will not appear in chat.
 
 ## Credits & Sources
 

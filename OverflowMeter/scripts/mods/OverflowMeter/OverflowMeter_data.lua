@@ -114,6 +114,82 @@ return {
                         tooltip = "widget_opacity_tooltip"
                     }
                 }
+            },
+            {
+                setting_id = "mission_summary_group",
+                type = "group",
+                tooltip = "mission_summary_group_tooltip",
+                sub_widgets = {
+                    {
+                        setting_id = "summary_keybind",
+                        type = "keybind",
+                        default_value = {},
+                        keybind_trigger = "held",
+                        keybind_type = "function_call",
+                        function_name = "hold_mission_summary",
+                        tooltip = "summary_keybind_tooltip"
+                    },
+                    {
+                        setting_id = "show_summary",
+                        type = "checkbox",
+                        default_value = false,
+                        tooltip = "show_summary_tooltip"
+                    },
+                    {
+                        setting_id = "summary_chat_on_end",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "summary_chat_on_end_tooltip"
+                    },
+                    {
+                        setting_id = "scoreboard_row_generated",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "scoreboard_row_generated_tooltip"
+                    },
+                    {
+                        setting_id = "scoreboard_row_replenished",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "scoreboard_row_replenished_tooltip"
+                    },
+                    {
+                        setting_id = "scoreboard_row_overflowed",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "scoreboard_row_overflowed_tooltip"
+                    },
+                    {
+                        setting_id = "scoreboard_row_shared",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "scoreboard_row_shared_tooltip"
+                    },
+                    {
+                        setting_id = "scoreboard_row_efficiency",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "scoreboard_row_efficiency_tooltip"
+                    },
+                    {
+                        setting_id = "summary_x",
+                        type = "numeric",
+                        default_value = 1630,
+                        range = { 0, 1820 },
+                        decimals_number = 0,
+                        step_size_value = 10,
+                        tooltip = "summary_x_tooltip"
+                    },
+                    {
+                        setting_id = "summary_y",
+                        type = "numeric",
+                        default_value = 850,
+                        range = { 0, 1020 },
+                        decimals_number = 0,
+                        step_size_value = 10,
+                        tooltip = "summary_y_tooltip"
+                    }
+                }
             }
         }
     }

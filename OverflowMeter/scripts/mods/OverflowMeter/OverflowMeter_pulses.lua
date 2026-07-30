@@ -13,6 +13,7 @@ local FULL_TOUGHNESS_EPSILON = 0.999
 local Pulses = {
     enabled = false,
     pending_fraction = 0,
+    pending_overflow = 0,
     unit = nil,
     buff_extension = nil,
     toughness_extension = nil,
@@ -44,6 +45,7 @@ end
 Pulses.disable = function()
     Pulses.enabled = false
     Pulses.pending_fraction = 0
+    Pulses.pending_overflow = 0
     Pulses.unit = nil
     Pulses.buff_extension = nil
     Pulses.toughness_extension = nil
@@ -60,14 +62,36 @@ Pulses.consume = function()
     return pending_fraction
 end
 
+Pulses.consume_overflow = function()
+    local pending_overflow = Pulses.pending_overflow
+
+    Pulses.pending_overflow = 0
+
+    return pending_overflow
+end
+
 local function _is_full()
     local toughness_extension = Pulses.toughness_extension
 
     return toughness_extension ~= nil and toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
 end
 
+local function _accumulate_overflow(fraction)
+    local toughness_extension = Pulses.toughness_extension
+
+    if not toughness_extension then
+        return
+    end
+
+    local excess = fraction * toughness_extension:max_toughness() - toughness_extension:toughness_damage()
+
+    if excess > 0 then
+        Pulses.pending_overflow = Pulses.pending_overflow + excess
+    end
+end
+
 local function _add_pulse(fraction, apply_replenish_stat_buffs)
-    if not fraction or fraction <= 0 or not _is_full() then
+    if not fraction or fraction <= 0 then
         return
     end
 
@@ -80,14 +104,14 @@ local function _add_pulse(fraction, apply_replenish_stat_buffs)
         end
     end
 
-    Pulses.pending_fraction = Pulses.pending_fraction + fraction
+    _accumulate_overflow(fraction)
+
+    if _is_full() then
+        Pulses.pending_fraction = Pulses.pending_fraction + fraction
+    end
 end
 
 local function _add_melee_kill_pulse()
-    if not _is_full() then
-        return
-    end
-
     local fraction = Sources.melee_kill_base_fraction
     local buff_extension = Pulses.buff_extension
     local stat_buffs = buff_extension and buff_extension.stat_buffs and buff_extension:stat_buffs()
@@ -97,7 +121,11 @@ local function _add_melee_kill_pulse()
     end
 
     if fraction > 0 then
-        Pulses.pending_fraction = Pulses.pending_fraction + fraction
+        _accumulate_overflow(fraction)
+
+        if _is_full() then
+            Pulses.pending_fraction = Pulses.pending_fraction + fraction
+        end
     end
 end
 

@@ -1,5 +1,7 @@
 local mod = get_mod("OverflowMeter")
 
+local math_floor = math.floor
+
 local settings = {
     meter_style = "gauge",
     show_title = true,
@@ -13,7 +15,16 @@ local settings = {
     widget_x = 30,
     widget_y = 420,
     widget_scale = 100,
-    widget_opacity = 100
+    widget_opacity = 100,
+    show_summary = false,
+    summary_x = 1630,
+    summary_y = 850,
+    scoreboard_row_generated = true,
+    scoreboard_row_replenished = true,
+    scoreboard_row_overflowed = true,
+    scoreboard_row_shared = true,
+    scoreboard_row_efficiency = true,
+    summary_chat_on_end = true
 }
 
 local SETTING_IDS = {
@@ -29,12 +40,23 @@ local SETTING_IDS = {
     "widget_x",
     "widget_y",
     "widget_scale",
-    "widget_opacity"
+    "widget_opacity",
+    "show_summary",
+    "summary_x",
+    "summary_y",
+    "scoreboard_row_generated",
+    "scoreboard_row_replenished",
+    "scoreboard_row_overflowed",
+    "scoreboard_row_shared",
+    "scoreboard_row_efficiency",
+    "summary_chat_on_end"
 }
 
 mod._settings = settings
 mod._settings_version = 0
 mod._reset_requested = false
+mod._summary_held = false
+mod._summary_echoed = false
 
 local function refresh_settings()
     for i = 1, #SETTING_IDS do
@@ -55,6 +77,7 @@ mod.on_setting_changed = function ()
     refresh_settings()
 end
 
+mod._stats = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_stats")
 mod._sources = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources")
 mod._pulses = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses")
 mod._sources_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_veteran")
@@ -114,20 +137,109 @@ mod.on_game_state_changed = function (status, state_name)
     if state_name == "StateGameplay" then
         mod._reset_requested = true
 
+        if status == "enter" then
+            mod._summary_echoed = false
+
+            mod._stats.reset()
+        end
+
         disable_all_pulses()
     end
 end
 
+local function echo_mission_summary()
+    if mod._summary_echoed or not settings.summary_chat_on_end then
+        return
+    end
+
+    local stats = mod._stats
+
+    if stats.generated <= 0 then
+        return
+    end
+
+    mod._summary_echoed = true
+
+    local shared = settings.rate_mode ~= "per_ally" and stats.shared_total or stats.shared
+    local message = mod:localize(
+        "summary_chat",
+        math_floor(stats.generated + 0.5),
+        math_floor(stats.replenished + 0.5),
+        math_floor(stats.overflowed + 0.5),
+        math_floor(shared + 0.5),
+        math_floor(stats.efficiency() * 100 + 0.5)
+    )
+
+    mod:echo("%s", message)
+end
+
+mod:hook_safe("EndView", "on_enter", function ()
+    echo_mission_summary()
+end)
+
 mod.on_enabled = function ()
     refresh_settings()
+
     mod._reset_requested = true
+
+    mod._stats.reset()
 end
 
 mod.on_disabled = function ()
     mod._reset_requested = true
+    mod._summary_held = false
+
+    mod._stats.reset()
 
     disable_all_pulses()
 end
+
+mod.hold_mission_summary = function (is_pressed)
+    mod._summary_held = is_pressed and true or false
+end
+
+mod.scoreboard_rows = {
+    {
+        name = "overflow_meter_generated",
+        text = "scoreboard_generated",
+        validation = "ASC",
+        iteration = "DIFF",
+        group = "defense",
+        setting = "scoreboard_row_generated"
+    },
+    {
+        name = "overflow_meter_replenished",
+        text = "scoreboard_replenished",
+        validation = "ASC",
+        iteration = "DIFF",
+        group = "defense",
+        setting = "scoreboard_row_replenished"
+    },
+    {
+        name = "overflow_meter_overflowed",
+        text = "scoreboard_overflowed",
+        validation = "ASC",
+        iteration = "DIFF",
+        group = "defense",
+        setting = "scoreboard_row_overflowed"
+    },
+    {
+        name = "overflow_meter_shared",
+        text = "scoreboard_shared",
+        validation = "ASC",
+        iteration = "DIFF",
+        group = "defense",
+        setting = "scoreboard_row_shared"
+    },
+    {
+        name = "overflow_meter_efficiency",
+        text = "scoreboard_efficiency",
+        validation = "ASC",
+        iteration = "ADD",
+        group = "defense",
+        setting = "scoreboard_row_efficiency"
+    }
+}
 
 mod:register_hud_element({
     class_name = "HudElementOverflowMeter",
