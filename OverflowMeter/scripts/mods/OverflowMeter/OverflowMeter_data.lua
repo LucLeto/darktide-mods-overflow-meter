@@ -172,6 +172,12 @@ return {
                         tooltip = "scoreboard_row_efficiency_tooltip"
                     },
                     {
+                        setting_id = "share_mission_summary",
+                        type = "checkbox",
+                        default_value = true,
+                        tooltip = "share_mission_summary_tooltip"
+                    },
+                    {
                         setting_id = "summary_x",
                         type = "numeric",
                         default_value = 1630,

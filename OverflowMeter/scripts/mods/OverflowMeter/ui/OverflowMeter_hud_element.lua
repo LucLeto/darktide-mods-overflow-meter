@@ -1152,7 +1152,6 @@ local function _arrange_scoreboard_rows(scoreboard)
     local count = #SCOREBOARD_ROW_NAMES
     local first_index = _scoreboard_row_index(rows, SCOREBOARD_ROW_NAMES[1])
 
-    -- Already sitting as a contiguous block directly ahead of the anchor.
     if not first_index or anchor_index - first_index == count then
         return
     end
