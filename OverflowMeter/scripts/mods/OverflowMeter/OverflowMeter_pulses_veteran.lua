@@ -15,6 +15,7 @@ local Pulses = {
     enabled = false,
     pending_excess = 0,
     pending_burst_share = 0,
+    pending_burst_overflow = 0,
     unit = nil,
     buff_extension = nil,
     toughness_extension = nil,
@@ -84,6 +85,7 @@ Pulses.disable = function()
     Pulses.enabled = false
     Pulses.pending_excess = 0
     Pulses.pending_burst_share = 0
+    Pulses.pending_burst_overflow = 0
     Pulses.unit = nil
     Pulses.buff_extension = nil
     Pulses.toughness_extension = nil
@@ -119,6 +121,14 @@ Pulses.consume_burst = function()
     Pulses.pending_burst_share = 0
 
     return pending_burst_share
+end
+
+Pulses.consume_burst_overflow = function()
+    local pending_burst_overflow = Pulses.pending_burst_overflow
+
+    Pulses.pending_burst_overflow = 0
+
+    return pending_burst_overflow
 end
 
 local function _accumulate_wanted(wanted)
@@ -196,6 +206,12 @@ local function _add_burst()
 
     if max_toughness > 0 then
         Pulses.pending_burst_share = Pulses.pending_burst_share + Sources.share_fraction * max_toughness
+
+        local excess = max_toughness - toughness_extension:toughness_damage()
+
+        if excess > 0 then
+            Pulses.pending_burst_overflow = Pulses.pending_burst_overflow + excess
+        end
     end
 end
 

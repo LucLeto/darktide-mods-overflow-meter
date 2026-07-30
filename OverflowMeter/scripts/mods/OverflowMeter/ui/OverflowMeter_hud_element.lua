@@ -3,6 +3,7 @@ local UIWidget = require("scripts/managers/ui/ui_widget")
 local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 local Estimator = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_estimator")
 local Geometry = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_gauge_geometry")
+local Stats = mod._stats
 
 local Color = Color
 local ScriptUnit = ScriptUnit
@@ -10,6 +11,8 @@ local math_abs = math.abs
 local math_floor = math.floor
 local pairs = pairs
 local string_format = string.format
+local table_insert = table.insert
+local table_remove = table.remove
 local table_clear = table.clear
     or function (t)
         for k in pairs(t) do
@@ -55,6 +58,19 @@ local METER_STYLE_BOTH = "both"
 
 local CUSTOM_HUD_MOD_NAME = "custom_hud"
 local CUSTOM_HUD_NODE_KEY = "HudElementOverflowMeter|overflow_meter"
+local CUSTOM_HUD_SUMMARY_NODE_KEY = "HudElementOverflowMeter|overflow_summary"
+local SCOREBOARD_MOD_NAME = "scoreboard"
+
+local OVENPROOF_MOD_NAME = "ovenproof_scoreboard_plugin"
+local OVENPROOF_ANCHOR_ROW = "blank_3"
+
+local SCOREBOARD_ROW_NAMES = {
+    "overflow_meter_generated",
+    "overflow_meter_replenished",
+    "overflow_meter_overflowed",
+    "overflow_meter_shared",
+    "overflow_meter_efficiency"
+}
 local MIN_EFFECTIVE_SCALE = 0.25
 local MAX_EFFECTIVE_SCALE = 3
 
@@ -111,6 +127,36 @@ local SEG_PEAK_RGB = { 245, 248, 240 }
 local READOUT_RGB_DIM = { 150, 160, 164 }
 local READOUT_RGB_SHARING = { 120, 205, 185 }
 local READOUT_RGB_USEFUL = { 245, 205, 120 }
+
+local SUM_NODE_W = 260
+local SUM_NODE_H = 152
+local SUM_ROW_COUNT = 5
+local SUM_TITLE_FONT_SIZE = 15
+local SUM_ROW_FONT_SIZE = 14
+local SUM_TITLE_OFFSET_Y = 0
+local SUM_ROW_OFFSET_Y = 26
+local SUM_ROW_STEP_Y = 22
+local SUM_TITLE_ALPHA = 255
+local SUM_LABEL_ALPHA = 200
+local SUM_VALUE_ALPHA = 255
+
+local SUM_LABEL_KEYS = {
+    "summary_generated",
+    "summary_replenished",
+    "summary_overflowed",
+    "summary_shared",
+    "summary_efficiency"
+}
+
+local SUM_LABEL_IDS = {}
+local SUM_VALUE_IDS = {}
+
+for i = 1, SUM_ROW_COUNT do
+    SUM_LABEL_IDS[i] = "sum_label_" .. i
+    SUM_VALUE_IDS[i] = "sum_value_" .. i
+end
+
+local ESTIMATE_PREFIX = "~"
 
 local function _lerp(a, b, t)
     return a + (b - a) * t
@@ -230,6 +276,59 @@ local function _build_definitions()
         }
     }
 
+    local summary_passes = {
+        {
+            pass_type = "text",
+            value_id = "sum_title",
+            style_id = "sum_title",
+            value = "",
+            style = {
+                font_type = "machine_medium",
+                font_size = SUM_TITLE_FONT_SIZE,
+                text_horizontal_alignment = "left",
+                text_vertical_alignment = "top",
+                size = { SUM_NODE_W, 20 },
+                offset = { 0, SUM_TITLE_OFFSET_Y, 3 },
+                text_color = Color.terminal_text_header(SUM_TITLE_ALPHA, true)
+            }
+        }
+    }
+
+    for i = 1, SUM_ROW_COUNT do
+        local row_offset_y = SUM_ROW_OFFSET_Y + (i - 1) * SUM_ROW_STEP_Y
+
+        summary_passes[#summary_passes + 1] = {
+            pass_type = "text",
+            value_id = SUM_LABEL_IDS[i],
+            style_id = SUM_LABEL_IDS[i],
+            value = "",
+            style = {
+                font_type = "proxima_nova_bold",
+                font_size = SUM_ROW_FONT_SIZE,
+                text_horizontal_alignment = "left",
+                text_vertical_alignment = "top",
+                size = { SUM_NODE_W, 20 },
+                offset = { 0, row_offset_y, 3 },
+                text_color = Color.terminal_text_body(SUM_LABEL_ALPHA, true)
+            }
+        }
+        summary_passes[#summary_passes + 1] = {
+            pass_type = "text",
+            value_id = SUM_VALUE_IDS[i],
+            style_id = SUM_VALUE_IDS[i],
+            value = "",
+            style = {
+                font_type = "proxima_nova_bold",
+                font_size = SUM_ROW_FONT_SIZE,
+                text_horizontal_alignment = "right",
+                text_vertical_alignment = "top",
+                size = { SUM_NODE_W, 20 },
+                offset = { 0, row_offset_y, 3 },
+                text_color = Color.terminal_text_body(SUM_VALUE_ALPHA, true)
+            }
+        }
+    end
+
     return {
         scenegraph_definition = {
             screen = UIWorkspaceSettings.screen,
@@ -239,10 +338,18 @@ local function _build_definitions()
                 vertical_alignment = "top",
                 size = { NODE_W, NODE_H },
                 position = { 30, 420, 55 }
+            },
+            overflow_summary = {
+                parent = "screen",
+                horizontal_alignment = "left",
+                vertical_alignment = "top",
+                size = { SUM_NODE_W, SUM_NODE_H },
+                position = { 1630, 850, 55 }
             }
         },
         widget_definitions = {
-            meter = UIWidget.create_definition(passes, "overflow_meter")
+            meter = UIWidget.create_definition(passes, "overflow_meter"),
+            summary = UIWidget.create_definition(summary_passes, "overflow_summary")
         }
     }
 end
@@ -269,9 +376,14 @@ HudElementOverflowMeter.init = function (self, parent, draw_layer, start_scale)
     self._sample_timer = 0
     self._opacity = 1
     self._force_refresh = true
+    self._summary_shown = false
+    self._sum_value_cache = {}
+    self._last_scoreboard_version = nil
+
     self:_clear_render_cache()
 
     self._widgets_by_name.meter.content.visible = false
+    self._widgets_by_name.summary.content.visible = false
 
     self:_apply_display_settings(mod._settings)
 end
@@ -289,6 +401,13 @@ HudElementOverflowMeter._clear_render_cache = function (self)
     self._last_lit = nil
     self._last_peak_index = nil
     self._last_gauge_value = nil
+    self._last_summary_version = nil
+
+    local sum_value_cache = self._sum_value_cache
+
+    for i = 1, SUM_ROW_COUNT do
+        sum_value_cache[i] = nil
+    end
 end
 
 HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_settings, input_service)
@@ -321,8 +440,9 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
         self._guard_timer = GUARD_INTERVAL
 
         local ch_managed, ch_factor = self:_custom_hud_layout()
+        local sum_managed, sum_factor = self:_custom_hud_node(CUSTOM_HUD_SUMMARY_NODE_KEY, SUM_NODE_W)
 
-        if ch_managed ~= self._applied_ch_managed or ch_factor ~= self._applied_ch_factor then
+        if ch_managed ~= self._applied_ch_managed or ch_factor ~= self._applied_ch_factor or sum_managed ~= self._applied_sum_managed or sum_factor ~= self._applied_sum_factor then
             self:_apply_display_settings(settings)
 
             self._force_refresh = true
@@ -340,7 +460,11 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
                 self:_reset_display()
             end
         end
+
+        self:_push_scoreboard(settings)
     end
+
+    self:_refresh_summary(settings)
 
     if not self._supported then
         return
@@ -367,7 +491,7 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
     end
 end
 
-HudElementOverflowMeter._custom_hud_layout = function (self)
+HudElementOverflowMeter._custom_hud_node = function (self, node_key, node_width)
     local custom_hud = get_mod(CUSTOM_HUD_MOD_NAME)
 
     if not custom_hud or not custom_hud.is_enabled or not custom_hud:is_enabled() then
@@ -375,7 +499,7 @@ HudElementOverflowMeter._custom_hud_layout = function (self)
     end
 
     local saved = custom_hud.get and custom_hud:get("saved_node_settings")
-    local entry = saved and saved[CUSTOM_HUD_NODE_KEY]
+    local entry = saved and saved[node_key]
 
     if not entry then
         return false, nil
@@ -388,10 +512,14 @@ HudElementOverflowMeter._custom_hud_layout = function (self)
     local default_width = default_size and default_size[1]
 
     if width and width > 0 and default_width and default_width > 0 and math_abs(width - default_width) > 0.5 then
-        return true, width / NODE_W
+        return true, width / node_width
     end
 
     return true, nil
+end
+
+HudElementOverflowMeter._custom_hud_layout = function (self)
+    return self:_custom_hud_node(CUSTOM_HUD_NODE_KEY, NODE_W)
 end
 
 HudElementOverflowMeter._check_supported = function (self, settings)
@@ -495,6 +623,8 @@ HudElementOverflowMeter._set_archetype = function (self, archetype)
 
     self._estimator:set_mode(sources.continuous_when_full, sources.has_inactive_state)
 
+    Stats.set_context(archetype, sources.share_fraction)
+
     self:_refresh_localization()
     self:_clear_render_cache()
 
@@ -532,6 +662,24 @@ HudElementOverflowMeter._count_allies = function (self)
     return allies, allies_missing
 end
 
+HudElementOverflowMeter._consume_bar_gain = function (self, toughness_damage, max_toughness)
+    local last_damage = self._last_toughness_damage
+    local bar_gain = 0
+
+    if last_damage and self._last_max_toughness == max_toughness then
+        local recovered = last_damage - toughness_damage
+
+        if recovered > 0 then
+            bar_gain = recovered
+        end
+    end
+
+    self._last_toughness_damage = toughness_damage
+    self._last_max_toughness = max_toughness
+
+    return bar_gain
+end
+
 HudElementOverflowMeter._sample = function (self)
     if self._archetype == ARCHETYPE_VETERAN then
         self:_sample_veteran()
@@ -565,6 +713,7 @@ HudElementOverflowMeter._sample = function (self)
     local toughness_extension = ctx.toughness_extension
     local max_toughness = toughness_extension:max_toughness()
     local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
+    local bar_gain = self:_consume_bar_gain(toughness_extension:toughness_damage(), max_toughness)
     local adapters = sources.adapters
     local total_rate = 0
 
@@ -604,6 +753,18 @@ HudElementOverflowMeter._sample = function (self)
     local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * sources.share_fraction * ally_multiplier
 
     self._estimator:sample(is_full, total_rate > 0, share_per_ally_per_second * ally_multiplier, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+
+    local stats_overflow = pulses.consume_overflow()
+    local stats_shareable = pending_pulse_fraction > 0 and pending_pulse_fraction * max_toughness or 0
+
+    if is_full and total_rate > 0 then
+        local continuous_amount = total_rate * max_toughness * replenish_multiplier * SAMPLE_INTERVAL
+
+        stats_overflow = stats_overflow + continuous_amount
+        stats_shareable = stats_shareable + continuous_amount
+    end
+
+    Stats.add_event(bar_gain, stats_overflow, stats_shareable, allies)
 end
 
 HudElementOverflowMeter._sample_veteran = function (self)
@@ -616,20 +777,7 @@ HudElementOverflowMeter._sample_veteran = function (self)
     local toughness_damage = toughness_extension:toughness_damage()
     local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
     local share_fraction = sources.share_fraction
-
-    local last_damage = self._last_toughness_damage
-    local bar_gain = 0
-
-    if last_damage and self._last_max_toughness == max_toughness then
-        local recovered = last_damage - toughness_damage
-
-        if recovered > 0 then
-            bar_gain = recovered
-        end
-    end
-
-    self._last_toughness_damage = toughness_damage
-    self._last_max_toughness = max_toughness
+    local bar_gain = self:_consume_bar_gain(toughness_damage, max_toughness)
 
     local allies, allies_missing = self:_count_allies()
     local ally_multiplier
@@ -653,7 +801,9 @@ HudElementOverflowMeter._sample_veteran = function (self)
         pulse_offered_per_second = share_fraction * pending_excess * ally_multiplier / SAMPLE_INTERVAL
     end
 
-    if is_full and allies > 0 then
+    local continuous_overflow = 0
+
+    if is_full then
         local continuous_fraction = pulses.active_continuous_fraction()
 
         if continuous_fraction > 0 then
@@ -664,7 +814,13 @@ HudElementOverflowMeter._sample_veteran = function (self)
                 replenish_multiplier = (stat_buffs.toughness_replenish_modifier or 1) * (stat_buffs.toughness_replenish_multiplier or 1)
             end
 
-            pulse_offered_per_second = pulse_offered_per_second + share_fraction * continuous_fraction * max_toughness * replenish_multiplier * ally_multiplier
+            local continuous_per_second = continuous_fraction * max_toughness * replenish_multiplier
+
+            continuous_overflow = continuous_per_second * SAMPLE_INTERVAL
+
+            if allies > 0 then
+                pulse_offered_per_second = pulse_offered_per_second + share_fraction * continuous_per_second * ally_multiplier
+            end
         end
     end
 
@@ -684,6 +840,10 @@ HudElementOverflowMeter._sample_veteran = function (self)
     local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * share_fraction * ally_multiplier
 
     self._estimator:sample(is_full, bar_gain > 0, continuous_offered_per_second, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+
+    local stats_overflow = pending_excess + continuous_overflow + pulses.consume_burst_overflow()
+
+    Stats.add_event(bar_gain, stats_overflow, bar_gain + stats_overflow, allies)
 end
 
 HudElementOverflowMeter._display_state = function (self, settings)
@@ -881,6 +1041,199 @@ HudElementOverflowMeter._refresh_text = function (self, settings, display_state)
     return dirty
 end
 
+HudElementOverflowMeter._set_summary_value = function (self, index, text)
+    local sum_value_cache = self._sum_value_cache
+
+    if sum_value_cache[index] == text then
+        return false
+    end
+
+    sum_value_cache[index] = text
+    self._widgets_by_name.summary.content[SUM_VALUE_IDS[index]] = text
+
+    return true
+end
+
+HudElementOverflowMeter._refresh_summary = function (self, settings)
+    local widget = self._widgets_by_name.summary
+
+    if not (settings.show_summary or mod._summary_held) or not (self._supported or Stats.generated > 0) then
+        if self._summary_shown then
+            self._summary_shown = false
+            widget.content.visible = false
+            widget.dirty = true
+        end
+
+        return
+    end
+
+    local version = Stats.version
+    local became_visible = not self._summary_shown
+
+    if not became_visible and version == self._last_summary_version then
+        return
+    end
+
+    self._summary_shown = true
+    self._last_summary_version = version
+
+    local dirty = became_visible
+
+    if became_visible then
+        widget.content.visible = true
+    end
+
+    local shared = self._rate_mode_total and Stats.shared_total or Stats.shared
+
+    dirty = self:_set_summary_value(1, ESTIMATE_PREFIX .. string_format("%d", math_floor(Stats.generated + 0.5))) or dirty
+    dirty = self:_set_summary_value(2, string_format("%d", math_floor(Stats.replenished + 0.5))) or dirty
+    dirty = self:_set_summary_value(3, ESTIMATE_PREFIX .. string_format("%d", math_floor(Stats.overflowed + 0.5))) or dirty
+    dirty = self:_set_summary_value(4, ESTIMATE_PREFIX .. string_format("%d", math_floor(shared + 0.5))) or dirty
+    dirty = self:_set_summary_value(5, ESTIMATE_PREFIX .. string_format("%d%%", math_floor(Stats.efficiency() * 100 + 0.5))) or dirty
+
+    if dirty then
+        widget.dirty = true
+    end
+end
+
+local function _replace_scoreboard_stat(scoreboard, row_name, account_id, value)
+    local row = scoreboard.get_scoreboard_row and scoreboard:get_scoreboard_row(row_name)
+
+    if not row then
+        return
+    end
+
+    local row_data = row.data
+
+    if not row_data then
+        row_data = {}
+        row.data = row_data
+    end
+
+    local entry = row_data[account_id]
+
+    if not entry then
+        entry = {}
+        row_data[account_id] = entry
+    end
+
+    entry.value = value
+    entry.score = value
+    entry.text = nil
+end
+
+local function _scoreboard_row_index(rows, name)
+    for i = 1, #rows do
+        if rows[i].name == name then
+            return i
+        end
+    end
+end
+
+local function _arrange_scoreboard_rows(scoreboard)
+    local rows = scoreboard.registered_scoreboard_rows
+
+    if not rows then
+        return
+    end
+
+    local ovenproof = get_mod(OVENPROOF_MOD_NAME)
+
+    if not ovenproof or not ovenproof.is_enabled or not ovenproof:is_enabled() then
+        return
+    end
+
+    local anchor_index = _scoreboard_row_index(rows, OVENPROOF_ANCHOR_ROW)
+
+    if not anchor_index then
+        return
+    end
+
+    local count = #SCOREBOARD_ROW_NAMES
+    local first_index = _scoreboard_row_index(rows, SCOREBOARD_ROW_NAMES[1])
+
+    -- Already sitting as a contiguous block directly ahead of the anchor.
+    if not first_index or anchor_index - first_index == count then
+        return
+    end
+
+    local group = rows[anchor_index].group
+    local moved = {}
+
+    for i = 1, count do
+        local index = _scoreboard_row_index(rows, SCOREBOARD_ROW_NAMES[i])
+
+        if index then
+            local entry = table_remove(rows, index)
+
+            entry.group = group
+            moved[#moved + 1] = entry
+        end
+    end
+
+    anchor_index = _scoreboard_row_index(rows, OVENPROOF_ANCHOR_ROW)
+
+    for i = #moved, 1, -1 do
+        table_insert(rows, anchor_index, moved[i])
+    end
+end
+
+HudElementOverflowMeter._push_scoreboard = function (self, settings)
+    if Stats.version == self._last_scoreboard_version then
+        return
+    end
+
+    local want_generated = settings.scoreboard_row_generated
+    local want_replenished = settings.scoreboard_row_replenished
+    local want_overflowed = settings.scoreboard_row_overflowed
+    local want_shared = settings.scoreboard_row_shared
+    local want_efficiency = settings.scoreboard_row_efficiency
+
+    if not (want_generated or want_replenished or want_overflowed or want_shared or want_efficiency) then
+        return
+    end
+
+    local scoreboard = get_mod(SCOREBOARD_MOD_NAME)
+
+    if not scoreboard or not scoreboard.update_stat or not scoreboard.is_enabled or not scoreboard:is_enabled() then
+        return
+    end
+
+    local player_manager = Managers.player
+    local player = player_manager and player_manager.local_player_safe and player_manager:local_player_safe(1)
+    local account_id = player and player.account_id and player:account_id()
+
+    if not account_id then
+        return
+    end
+
+    _arrange_scoreboard_rows(scoreboard)
+
+    self._last_scoreboard_version = Stats.version
+
+    if want_generated then
+        scoreboard:update_stat("overflow_meter_generated", account_id, math_floor(Stats.generated + 0.5))
+    end
+
+    if want_replenished then
+        scoreboard:update_stat("overflow_meter_replenished", account_id, math_floor(Stats.replenished + 0.5))
+    end
+
+    if want_overflowed then
+        scoreboard:update_stat("overflow_meter_overflowed", account_id, math_floor(Stats.overflowed + 0.5))
+    end
+
+    if want_shared then
+        local shared = self._rate_mode_total and Stats.shared_total or Stats.shared
+
+        scoreboard:update_stat("overflow_meter_shared", account_id, math_floor(shared + 0.5))
+    end
+
+    if want_efficiency then
+        _replace_scoreboard_stat(scoreboard, "overflow_meter_efficiency", account_id, math_floor(Stats.efficiency() * 100 + 0.5))
+    end
+end
+
 HudElementOverflowMeter._rate_state_text = function (self, plain_text, rate_key, rate_str, settings)
     if not settings.show_rate then
         return plain_text
@@ -918,20 +1271,36 @@ HudElementOverflowMeter._apply_display_settings = function (self, settings)
     self._applied_settings_version = mod._settings_version
 
     local ch_managed, ch_factor = self:_custom_hud_layout()
+    local sum_managed, sum_factor = self:_custom_hud_node(CUSTOM_HUD_SUMMARY_NODE_KEY, SUM_NODE_W)
 
     self._applied_ch_managed = ch_managed
     self._applied_ch_factor = ch_factor
+    self._applied_sum_managed = sum_managed
+    self._applied_sum_factor = sum_factor
 
     if not ch_managed then
         self:set_scenegraph_position("overflow_meter", settings.widget_x, settings.widget_y)
     end
 
-    local scale = ch_factor or (settings.widget_scale or 100) / 100
+    if not sum_managed then
+        self:set_scenegraph_position("overflow_summary", settings.summary_x, settings.summary_y)
+    end
+
+    local widget_scale = (settings.widget_scale or 100) / 100
+    local scale = ch_factor or widget_scale
 
     if scale < MIN_EFFECTIVE_SCALE then
         scale = MIN_EFFECTIVE_SCALE
     elseif scale > MAX_EFFECTIVE_SCALE then
         scale = MAX_EFFECTIVE_SCALE
+    end
+
+    local sum_scale = sum_factor or widget_scale
+
+    if sum_scale < MIN_EFFECTIVE_SCALE then
+        sum_scale = MIN_EFFECTIVE_SCALE
+    elseif sum_scale > MAX_EFFECTIVE_SCALE then
+        sum_scale = MAX_EFFECTIVE_SCALE
     end
 
     local opacity = (settings.widget_opacity or 100) / 100
@@ -1013,12 +1382,40 @@ HudElementOverflowMeter._apply_display_settings = function (self, settings)
         self._estimator:reset()
     end
 
+    local summary_widget = self._widgets_by_name.summary
+    local summary_style = summary_widget.style
+    local sum_node_w = SUM_NODE_W * sum_scale
+
+    self:_set_scenegraph_size("overflow_summary", sum_node_w, SUM_NODE_H * sum_scale)
+
+    summary_style.sum_title.font_size = SUM_TITLE_FONT_SIZE * sum_scale
+    summary_style.sum_title.offset[2] = SUM_TITLE_OFFSET_Y * sum_scale
+    summary_style.sum_title.size[1] = sum_node_w
+    summary_style.sum_title.text_color[1] = math_floor(SUM_TITLE_ALPHA * opacity)
+
+    for i = 1, SUM_ROW_COUNT do
+        local row_offset_y = (SUM_ROW_OFFSET_Y + (i - 1) * SUM_ROW_STEP_Y) * sum_scale
+        local label_style = summary_style[SUM_LABEL_IDS[i]]
+        local value_style = summary_style[SUM_VALUE_IDS[i]]
+
+        label_style.font_size = SUM_ROW_FONT_SIZE * sum_scale
+        label_style.offset[2] = row_offset_y
+        label_style.size[1] = sum_node_w
+        label_style.text_color[1] = math_floor(SUM_LABEL_ALPHA * opacity)
+
+        value_style.font_size = SUM_ROW_FONT_SIZE * sum_scale
+        value_style.offset[2] = row_offset_y
+        value_style.size[1] = sum_node_w
+        value_style.text_color[1] = math_floor(SUM_VALUE_ALPHA * opacity)
+    end
+
     self:_refresh_localization()
 
     self._force_refresh = true
     self:_clear_render_cache()
 
     widget.dirty = true
+    summary_widget.dirty = true
 end
 
 HudElementOverflowMeter._refresh_localization = function (self)
@@ -1041,6 +1438,14 @@ HudElementOverflowMeter._refresh_localization = function (self)
     local title_key = archetype_config and archetype_config.title_key or "hud_title"
 
     self._widgets_by_name.meter.content.title = mod:localize(title_key)
+
+    local summary_content = self._widgets_by_name.summary.content
+
+    summary_content.sum_title = mod:localize("summary_title")
+
+    for i = 1, SUM_ROW_COUNT do
+        summary_content[SUM_LABEL_IDS[i]] = mod:localize(SUM_LABEL_KEYS[i])
+    end
 end
 
 return HudElementOverflowMeter
