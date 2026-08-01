@@ -81,6 +81,7 @@ mod.on_setting_changed = function ()
     refresh_settings()
 
     mod._share.refresh()
+    mod._snapshot.refresh()
 end
 
 mod._stats = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_stats")
@@ -98,6 +99,13 @@ mod._pulses_by_archetype = {
     cryptic = mod._pulses,
     veteran = mod._pulses_veteran
 }
+
+mod._snapshot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_snapshot")
+
+mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_scoreboard")
+mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_vt2_scoreboard")
+mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_scores")
+mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_power_di")
 
 mod._share = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_share")
 
@@ -150,6 +158,7 @@ mod.on_game_state_changed = function (status, state_name)
 
             mod._stats.reset()
             mod._share.reset()
+            mod._snapshot.reset()
         end
 
         disable_all_pulses()
@@ -186,10 +195,12 @@ mod:hook_safe("EndView", "on_enter", function ()
     echo_mission_summary()
 
     mod._share.push_peers()
+    mod._snapshot.flush()
 end)
 
 mod.on_all_mods_loaded = function ()
     mod._share.setup()
+    mod._snapshot.setup()
 end
 
 mod.update = function (dt)
@@ -203,6 +214,7 @@ mod.on_enabled = function ()
 
     mod._stats.reset()
     mod._share.refresh()
+    mod._snapshot.reset()
 end
 
 mod.on_disabled = function ()
@@ -211,12 +223,15 @@ mod.on_disabled = function ()
 
     mod._stats.reset()
     mod._share.teardown()
+    mod._snapshot.reset()
+    mod._snapshot.teardown()
 
     disable_all_pulses()
 end
 
 mod.on_unload = function ()
     mod._share.teardown()
+    mod._snapshot.teardown()
 end
 
 mod.hold_mission_summary = function (is_pressed)

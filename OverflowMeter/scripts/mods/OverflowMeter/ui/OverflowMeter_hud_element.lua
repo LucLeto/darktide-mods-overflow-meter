@@ -4,6 +4,7 @@ local UIWorkspaceSettings = require("scripts/settings/ui/ui_workspace_settings")
 local Estimator = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_estimator")
 local Geometry = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_gauge_geometry")
 local Stats = mod._stats
+local Snapshot = mod._snapshot
 
 local Color = Color
 local ScriptUnit = ScriptUnit
@@ -11,8 +12,6 @@ local math_abs = math.abs
 local math_floor = math.floor
 local pairs = pairs
 local string_format = string.format
-local table_insert = table.insert
-local table_remove = table.remove
 local table_clear = table.clear
     or function (t)
         for k in pairs(t) do
@@ -59,18 +58,6 @@ local METER_STYLE_BOTH = "both"
 local CUSTOM_HUD_MOD_NAME = "custom_hud"
 local CUSTOM_HUD_NODE_KEY = "HudElementOverflowMeter|overflow_meter"
 local CUSTOM_HUD_SUMMARY_NODE_KEY = "HudElementOverflowMeter|overflow_summary"
-local SCOREBOARD_MOD_NAME = "scoreboard"
-
-local OVENPROOF_MOD_NAME = "ovenproof_scoreboard_plugin"
-local OVENPROOF_ANCHOR_ROW = "blank_3"
-
-local SCOREBOARD_ROW_NAMES = {
-    "overflow_meter_generated",
-    "overflow_meter_replenished",
-    "overflow_meter_overflowed",
-    "overflow_meter_shared",
-    "overflow_meter_efficiency"
-}
 local MIN_EFFECTIVE_SCALE = 0.25
 local MAX_EFFECTIVE_SCALE = 3
 
@@ -379,6 +366,7 @@ HudElementOverflowMeter.init = function (self, parent, draw_layer, start_scale)
     self._summary_shown = false
     self._sum_value_cache = {}
     self._last_scoreboard_version = nil
+    self._last_scoreboard_settings_version = nil
 
     self:_clear_render_cache()
 
@@ -1096,105 +1084,11 @@ HudElementOverflowMeter._refresh_summary = function (self, settings)
     end
 end
 
-local function _replace_scoreboard_stat(scoreboard, row_name, account_id, value)
-    local row = scoreboard.get_scoreboard_row and scoreboard:get_scoreboard_row(row_name)
-
-    if not row then
-        return
-    end
-
-    local row_data = row.data
-
-    if not row_data then
-        row_data = {}
-        row.data = row_data
-    end
-
-    local entry = row_data[account_id]
-
-    if not entry then
-        entry = {}
-        row_data[account_id] = entry
-    end
-
-    entry.value = value
-    entry.score = value
-    entry.text = nil
-end
-
-local function _scoreboard_row_index(rows, name)
-    for i = 1, #rows do
-        if rows[i].name == name then
-            return i
-        end
-    end
-end
-
-local function _arrange_scoreboard_rows(scoreboard)
-    local rows = scoreboard.registered_scoreboard_rows
-
-    if not rows then
-        return
-    end
-
-    local ovenproof = get_mod(OVENPROOF_MOD_NAME)
-
-    if not ovenproof or not ovenproof.is_enabled or not ovenproof:is_enabled() then
-        return
-    end
-
-    local anchor_index = _scoreboard_row_index(rows, OVENPROOF_ANCHOR_ROW)
-
-    if not anchor_index then
-        return
-    end
-
-    local count = #SCOREBOARD_ROW_NAMES
-    local first_index = _scoreboard_row_index(rows, SCOREBOARD_ROW_NAMES[1])
-
-    if not first_index or anchor_index - first_index == count then
-        return
-    end
-
-    local group = rows[anchor_index].group
-    local moved = {}
-
-    for i = 1, count do
-        local index = _scoreboard_row_index(rows, SCOREBOARD_ROW_NAMES[i])
-
-        if index then
-            local entry = table_remove(rows, index)
-
-            entry.group = group
-            moved[#moved + 1] = entry
-        end
-    end
-
-    anchor_index = _scoreboard_row_index(rows, OVENPROOF_ANCHOR_ROW)
-
-    for i = #moved, 1, -1 do
-        table_insert(rows, anchor_index, moved[i])
-    end
-end
-
 HudElementOverflowMeter._push_scoreboard = function (self, settings)
-    if Stats.version == self._last_scoreboard_version then
-        return
-    end
+    local stats_version = Stats.version
+    local settings_version = mod._settings_version
 
-    local want_generated = settings.scoreboard_row_generated
-    local want_replenished = settings.scoreboard_row_replenished
-    local want_overflowed = settings.scoreboard_row_overflowed
-    local want_shared = settings.scoreboard_row_shared
-    local want_efficiency = settings.scoreboard_row_efficiency
-
-    if not (want_generated or want_replenished or want_overflowed or want_shared or want_efficiency) then
-        return
-    end
-
-    local scoreboard = get_mod(SCOREBOARD_MOD_NAME)
-
-    if not scoreboard or not scoreboard.update_stat or not scoreboard.is_enabled or not scoreboard:is_enabled() then
+    if stats_version == self._last_scoreboard_version and settings_version == self._last_scoreboard_settings_version then
         return
     end
 
@@ -1206,31 +1100,11 @@ HudElementOverflowMeter._push_scoreboard = function (self, settings)
         return
     end
 
-    _arrange_scoreboard_rows(scoreboard)
+    self._last_scoreboard_version = stats_version
+    self._last_scoreboard_settings_version = settings_version
 
-    self._last_scoreboard_version = Stats.version
-
-    if want_generated then
-        scoreboard:update_stat("overflow_meter_generated", account_id, math_floor(Stats.generated + 0.5))
-    end
-
-    if want_replenished then
-        scoreboard:update_stat("overflow_meter_replenished", account_id, math_floor(Stats.replenished + 0.5))
-    end
-
-    if want_overflowed then
-        scoreboard:update_stat("overflow_meter_overflowed", account_id, math_floor(Stats.overflowed + 0.5))
-    end
-
-    if want_shared then
-        local shared = self._rate_mode_total and Stats.shared_total or Stats.shared
-
-        scoreboard:update_stat("overflow_meter_shared", account_id, math_floor(shared + 0.5))
-    end
-
-    if want_efficiency then
-        _replace_scoreboard_stat(scoreboard, "overflow_meter_efficiency", account_id, math_floor(Stats.efficiency() * 100 + 0.5))
-    end
+    Snapshot.update_local(account_id, self._archetype)
+    Snapshot.publish(false)
 end
 
 HudElementOverflowMeter._rate_state_text = function (self, plain_text, rate_key, rate_str, settings)

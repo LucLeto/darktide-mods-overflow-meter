@@ -56,14 +56,35 @@ The current maximum Toughness is used throughout, so temporary increases such as
 
 The game destroys the whole HUD during mission teardown, before the end-of-round screen opens, so the panel cannot follow you there. Two things can:
 
-* **A chat line** (`Post the summary to chat at mission end`, on by default). When the end-of-round screen opens, the totals are written as a single `mod:echo` line. Chat is one of the few UI layers that stays alive on that screen, so the message is readable there and remains in your chat history.
-* **Scoreboard rows**, described next.
+* **A chat line** (`Show the summary in your own chat at mission end`, on by default). When the end-of-round screen opens, the totals are written as a single `mod:echo` line. Chat is one of the few UI layers that stays alive on that screen, so the message is readable there and remains in your chat history.
+
+  **Only you see it.** `mod:echo` inserts the line straight into your own chat UI element on the `PRIVATE` channel, stamped `[OverflowMeter]` rather than your character name. It never reaches `ChatManager`'s send path, so no network message exists and no teammate - modded or not - receives anything. The mod does not talk for you.
+* **Rows in a scoreboard or stat-tracking mod**, described next.
 
 The two are independent - run either, or both.
 
-### Scoreboard support (optional)
+### Scoreboard and stat-tracker support (optional)
 
-When the [Scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/22) mod is installed, all five metrics are registered as rows through its plugin API, in Scoreboard's *Defence* group. They appear both in Scoreboard's Tactical Overlay panel and, more usefully, **on the end-of-mission screen**, which the mod's own panel cannot reach (see below). Each row has its own checkbox in the `Mission summary` settings group, so you can show only the ones you care about; without Scoreboard installed the settings do nothing.
+All five metrics are computed once, into a single provider-neutral mission summary, and that one summary feeds every supported mod. Four are supported:
+
+| Mod | Verified against | Shows the metrics in | Keeps mission history |
+| --- | --- | --- | --- |
+| [Scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/22) | 22-2-17 | Tactical Overlay and the end-of-mission screen | no |
+| `vt2_scoreboard` | v7 | its overlay and the end-of-mission view | no |
+| `scores` (formerly `scoreboard-ii`) | 1.0 and 18.3 | Tactical Overlay, end-of-mission screen, and its history view | yes |
+| `Power_DI` | 1.1.21 | its own reporting UI | yes |
+
+Every adapter is optional and detected at runtime. Installing none of these mods changes nothing, and installing several is fine - each one is written independently, so they cannot corrupt one another's values.
+
+Rules that hold across all of them:
+
+* **The five `Mission summary` checkboxes control the scoreboard rows** - Generated, Replenished, Overflowed, Shared, Efficiency - in every scoreboard mod at once. Power_DI is the exception: it records the full summary regardless, so its history is not shaped by a display preference you changed later.
+* **The `~` estimate marker is carried in the row labels**, so it survives wherever the label is shown. Only `Replenished` is observed; everything else is inferred (see [Limitations](#limitations)).
+* **A final synchronisation happens before any end-of-mission view is built** or any history entry is written, so what you see on the score screen is the finished mission, not the last mid-mission sample.
+
+#### Scoreboard
+
+All five metrics are registered as rows through its plugin API, in Scoreboard's *Defence* group. They appear both in Scoreboard's Tactical Overlay panel and, more usefully, **on the end-of-mission screen**, which the mod's own panel cannot reach (see below).
 
 Two behaviours worth knowing:
 
@@ -74,17 +95,64 @@ Two behaviours worth knowing:
   Scoreboard has no ordering field, so this is done by moving the registered row entries, anchored on a named Ovenproof spacer row. If that row is ever renamed or removed the repositioning is skipped and the rows simply stay where they were.
 * **Scoreboard's panel is capped at 1000 px** (`Scoreboard panel height`, whose maximum *is* its default). Past that the frame stops growing while rows keep drawing, so they spill over the bottom border and the overflowing rows get progressively indented. Adding these five rows costs roughly 126 px, including the *Defense Score* row that the Defence group only generates once it has at least one visible row. If your scoreboard already overflows, the cheapest space to reclaim is elsewhere: Ovenproof's plugin has a `bottom_padding` option gating four blank spacer rows (~72 px, no information lost), and its per-tier options each gate a large block of rows. Otherwise, untick the rows here you can do without - *Generated* is simply Replenished + Overflowed, and *Efficiency* is their ratio.
 
+#### VT2 Scoreboard
+
+The five rows are registered directly with VT2 Scoreboard's row list and show up in its overlay and its end-of-mission view.
+
+* **Values are assigned, not accumulated.** VT2 Scoreboard offers only accumulating row types, which would make *Efficiency* ratchet upwards instead of showing its current value, and would stop *Shared* from ever going back down after you switch `Rate display` from Total to Per ally. Both are therefore written into the cell directly.
+* **Row labels are resolved once, when the rows are registered.** VT2 Scoreboard looks labels up against its own localization, so the already-translated text is handed over instead of a key. Changing the game language takes effect after the next reload.
+* VT2 Scoreboard stores nothing on disk, so there is no mission history for these rows - only the live and end-of-mission displays.
+
+#### Scores (formerly Scoreboard II)
+
+This mod was renamed from *Scoreboard II* to *Scores*, and its version numbering restarted at 1.0. Both mod ids are recognised, so either release works.
+
+The five rows are registered with it, placed in its *Support* section after *Ammo collected*, and included in its mission history.
+
+* **This adapter is pinned to known versions** (currently Scores 1.0 and Scoreboard II 18.3). It draws a hard-coded list of rows and deliberately hides any row that is not on it, so showing these rows means adjusting its layout result - which is an implementation detail, not a supported extension point. On any other version the rows are still registered but stay hidden, and a single line is written to the log. That way an update can never break your end-of-mission screen; the rows simply disappear until the adapter has been re-verified.
+* **Values are assigned exactly**, using its own assigning setter, for the same reason as above.
+* Row visibility is handled by registering and unregistering the rows rather than through its per-row setting mechanism, because a foreign mod's setting is not resolvable once an entry has been reloaded from history.
+* Rows reloaded from history are re-registered against the host mod, which would otherwise leave these rows unable to resolve their own labels; the adapter re-claims them so the history view shows proper text.
+* **The Efficiency row uses a shorter label here.** This board's label column is narrow enough that the full *Toughness share efficiency (~%)* wraps onto a second line and collides with the row above it, so a short variant is used. The other scoreboards keep the full label.
+
+#### Power_DI
+
+One summary row per player per mission is written into a Power_DI datasource, and a matching dataset and report template are registered.
+
+* **Power_DI collection ignores the five row checkboxes.** Those control what a scoreboard *displays*; recorded history should not depend on a display preference, so the full summary is always stored.
+* **Both `Shared` variants are stored** - per ally and across all allies - so old missions stay readable whichever way `Rate display` is set now.
+* **You need to create the report once.** Power_DI only seeds its report list from registered templates when that list is completely empty, so an existing Power_DI user will never see a new report appear on its own. It takes about fifteen seconds:
+
+  1. Bind a key to **Open Power DI** in Power_DI's mod options - it ships unbound, which is the step most people miss.
+  2. Play a mission with both mods enabled. Power_DI builds its per-session tables when the session starts, so only missions begun after installing this version carry the data.
+  3. Open the view and pick the mission from the **Sessions** list.
+  4. Go to **Reports**, press **New**.
+  5. Give it a **Name**, then set **Template** to `Overflow Meter`. Dataset and report type fill themselves in.
+  6. **Save and exit**. The report stays in your list from then on, for every session.
+
+  There is a *Clear user report templates* option that would force the automatic seeding instead, but it needs a game restart to take effect and discards every report you have customised, so the manual route above is the better one.
+* Power_DI does not persist solo/offline sessions at all - that is its own behaviour, not something this mod controls.
+
+#### Mods deliberately not integrated
+
+**Uptime 2** needs no adapter, and does not have one on purpose. Its buff tracking is generic and event-based, so Power Overflow and Born Leader already appear there as buffs with their own uptime timelines - which is the one view this mod does not provide. The two are complementary: Uptime answers *how long the talent was active*, this mod answers *how much Toughness that produced*.
+
+Pushing these totals into Uptime anyway would mean appending them to its scoreboard, which is a fixed seven-stat **damage** breakdown (Horde / Elite / Special / Boss / Total / Damage Taken / Times Assisted) rather than a general row registry. That would require mutating the stat count that drives its own team totals, ranking, and tactical overlay - and unlike Scores, Uptime reports no consistent version to pin against, so there would be no way to fail safe on a future release. The values would also be live-only, since its history stores buff timelines rather than the damage table.
+
+**CombatStats** is likewise unsupported. Its tracker, UI, and history schemas are fixed and it exposes no provider API, so a live-only integration would need private UI hooks and a persistent one would need a separate sidecar file. Proper support belongs upstream, in collaboration with that mod's author.
+
 ### Shared mission summary (optional)
 
 On its own the Scoreboard integration can only ever fill **your** column - every other column reads zero, even for a teammate who is running this mod with a sharing talent equipped. Power Overflow and Born Leader are processed entirely by the server, so no client can observe another player's replenishment. But every client can compute its own totals, and those totals can be replicated between clients.
 
-Each client therefore publishes its own mission totals, and every other client running the mod fills in that player's Scoreboard column from the published values. No extra mod is needed - the totals travel as an Immaterium presence key-value, the same backend-relayed channel the game itself uses for `havoc_status` and the serialized character profile. Controlled by `Share mission summary` (on by default).
+Each client therefore publishes its own mission totals, and every other client running the mod fills in that player's column from the published values, on whichever supported scoreboard that client happens to use. No extra mod is needed - the totals travel as an Immaterium presence key-value, the same backend-relayed channel the game itself uses for `havoc_status` and the serialized character profile. Controlled by `Share mission summary` (on by default).
 
 What this does and does not do:
 
 * **Both players need Overflow Meter.** A teammate's column is only filled if they run the mod too. Players without it publish nothing, and their column behaves exactly as it does today.
 * **This does not make any number more accurate.** The server reports the shared amount to nobody - including the sharing player's own client - so a teammate's published figures are their client's estimate, produced by the same inference code with the same error bars described under [Limitations](#limitations). The `~` markers apply to every column, not just yours.
 * **Only players who queued together as a party are reached.** Presence replicates across the Immaterium *party*, which is not the same set as the players in your mission. In quickplay with strangers there is nobody to exchange with, and the board looks exactly as it does without this feature.
+* **You do not both need the same scoreboard mod.** What travels between clients is the mission summary itself, not any particular mod's rows. One of you can be on Scoreboard and the other on Scores, VT2 Scoreboard, Power_DI, or none of them at all.
 * **Only mission statistics are published**, in a payload of about 75 bytes. Presence is readable by any account holding a member's account id, so nothing else is ever put on it. The mod never publishes a value over 250 bytes, because the backend rejects any presence value above 256 and responds by dropping the whole presence stream.
 
 Turning `Share mission summary` off clears the published value; you will still read and display the totals of teammates who share theirs.
@@ -208,7 +276,7 @@ Because these two paths are mutually exclusive - the bar delta below full, the m
 
 `Power Overflow Meter` group: meter style (Gauge / Text / Both), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To turn the meter off entirely, disable the mod through the standard mod toggle.
 
-`Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per Scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default), publishing your totals to teammates running the mod (on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
+`Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default, applied to every supported scoreboard mod), publishing your totals to teammates running the mod (on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
 
 ## Custom HUD support (optional)
 
@@ -245,7 +313,7 @@ The summary inherits all of the above, plus:
 * *(Power Overflow)* Toughness wasted while **below** full counts as `Overflowed` but never as `Shared`: the talent only procs when the replenishment restored nothing at all, so a partial clamp is wasted without being shared. Expect `Shared` to be well under 25 % of `Generated`.
 * *(Born Leader)* When Duty and Honour raises maximum Toughness in the same instant Voice of Command restores it, that one bar-delta sample is skipped by the max-change guard, so `Replenished` misses that shout's restored portion.
 * `Shared` is what the talent *offers*. The server does not tell clients how much each ally actually received, and per-ally delivery is out of scope.
-* **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line and the Scoreboard rows are the two supported ways to see the totals on that screen.
+* **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line and the scoreboard rows are the two supported ways to see the totals on that screen.
 * The chat line depends on DMF's own `echo` output mode. If you have set DMF to route echoes to the log only, the message will not appear in chat.
 * **A teammate's shared column is their estimate, not a measurement.** It carries every limitation above, produced independently on their machine. It is there for attribution and comparison, not precision.
 

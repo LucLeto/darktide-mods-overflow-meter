@@ -1,16 +1,14 @@
 local mod = get_mod("OverflowMeter")
 local Stats = mod._stats
+local Snapshot = mod._snapshot
 
 local Managers = Managers
 local cjson = cjson
 local math_floor = math.floor
 local pairs = pairs
 local pcall = pcall
-local tonumber = tonumber
 local tostring = tostring
 local type = type
-
-local SCOREBOARD_MOD_NAME = "scoreboard"
 
 local KEY = "overflow_meter_summary"
 local PAYLOAD_VERSION = 1
@@ -19,8 +17,6 @@ local MAX_PUBLISH_BYTES = 250
 local MAX_INBOUND_BYTES = 1024
 
 local PUBLISH_INTERVAL = 2
-
-local MAX_STAT = 1000000000
 
 local DEBUG_MEMBERS = true
 
@@ -85,60 +81,6 @@ local function _decode_summary(raw)
     end
 
     return decoded
-end
-
-local function _stat(value)
-    value = tonumber(value)
-
-    if not value or not (value >= 0) then
-        return 0
-    end
-
-    if value > MAX_STAT then
-        return MAX_STAT
-    end
-
-    return math_floor(value)
-end
-
-local function _percent(value)
-    value = tonumber(value)
-
-    if not value or not (value >= 0) then
-        return 0
-    end
-
-    if value > 100 then
-        return 100
-    end
-
-    return math_floor(value)
-end
-
-local function _replace_scoreboard_stat(scoreboard, row_name, account_id, value)
-    local row = scoreboard.get_scoreboard_row and scoreboard:get_scoreboard_row(row_name)
-
-    if not row then
-        return
-    end
-
-    local row_data = row.data
-
-    if not row_data then
-        row_data = {}
-        row.data = row_data
-    end
-
-    local entry = row_data[account_id]
-
-    if not entry then
-        entry = {}
-        row_data[account_id] = entry
-    end
-
-    entry.value = value
-    entry.score = value
-    entry.text = nil
 end
 
 local function _push_presence()
@@ -292,31 +234,13 @@ local function _log_members(tag)
 end
 
 local function _push_peers(force)
-    local settings = mod._settings
-
-    local want_generated = settings.scoreboard_row_generated
-    local want_replenished = settings.scoreboard_row_replenished
-    local want_overflowed = settings.scoreboard_row_overflowed
-    local want_shared = settings.scoreboard_row_shared
-    local want_efficiency = settings.scoreboard_row_efficiency
-
-    if not (want_generated or want_replenished or want_overflowed or want_shared or want_efficiency) then
-        return
-    end
-
-    local scoreboard = get_mod(SCOREBOARD_MOD_NAME)
-
-    if not scoreboard or not scoreboard.update_stat or not scoreboard.is_enabled or not scoreboard:is_enabled() then
-        return
-    end
-
     local members = _members()
 
     if not members then
         return
     end
 
-    local rate_mode_total = settings.rate_mode ~= "per_ally"
+    local changed = false
 
     for i = 1, #members do
         local member = members[i]
@@ -332,28 +256,16 @@ local function _push_peers(force)
                 peer_raw[account_id] = raw
 
                 if peer then
-                    if want_generated then
-                        scoreboard:update_stat("overflow_meter_generated", account_id, _stat(peer.g))
-                    end
+                    Snapshot.update_peer(account_id, peer)
 
-                    if want_replenished then
-                        scoreboard:update_stat("overflow_meter_replenished", account_id, _stat(peer.r))
-                    end
-
-                    if want_overflowed then
-                        scoreboard:update_stat("overflow_meter_overflowed", account_id, _stat(peer.o))
-                    end
-
-                    if want_shared then
-                        scoreboard:update_stat("overflow_meter_shared", account_id, _stat(rate_mode_total and peer.st or peer.s))
-                    end
-
-                    if want_efficiency then
-                        _replace_scoreboard_stat(scoreboard, "overflow_meter_efficiency", account_id, _percent(peer.e))
-                    end
+                    changed = true
                 end
             end
         end
+    end
+
+    if changed or force then
+        Snapshot.publish(force)
     end
 end
 
@@ -441,6 +353,8 @@ Share.update = function (dt)
         end_published = true
 
         _set_published(_encode_summary() or "")
+
+        Snapshot.flush()
     end
 
     _push_peers(false)
