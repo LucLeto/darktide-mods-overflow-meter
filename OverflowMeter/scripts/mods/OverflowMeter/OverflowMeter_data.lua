@@ -19,7 +19,8 @@ return {
                         options = {
                             { text = "meter_style_gauge", value = "gauge" },
                             { text = "meter_style_text", value = "text" },
-                            { text = "meter_style_both", value = "both" }
+                            { text = "meter_style_both", value = "both" },
+                            { text = "meter_style_none", value = "none" }
                         }
                     },
                     {
