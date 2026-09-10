@@ -14,6 +14,7 @@ local METRICS = Snapshot.METRICS
 local METRIC_COUNT = Snapshot.METRIC_COUNT
 
 local FIELDS = {}
+local STAT_IDS = {}
 local SUFFIXES = {}
 local MASK_BITS = {}
 
@@ -21,6 +22,8 @@ for i = 1, METRIC_COUNT do
     local metric = METRICS[i]
 
     FIELDS[i] = metric.field
+    -- Another Scoreboard sorts a group's rows by stat key; the index prefix keeps the metric order.
+    STAT_IDS[i] = i .. "_" .. metric.id
     SUFFIXES[i] = metric.id == "efficiency" and "%" or nil
     MASK_BITS[i] = 2 ^ (i - 1)
 end
@@ -92,7 +95,7 @@ local function _register(scoreboard)
 
         if settings[metric.setting] then
             local stat_key, stat_error = scoreboard:register_external_stat(mod, {
-                id = metric.id,
+                id = STAT_IDS[i],
                 label = mod:localize(metric.loc),
                 group = group_key,
                 value_type = "number",
