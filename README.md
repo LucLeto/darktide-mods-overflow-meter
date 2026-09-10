@@ -65,14 +65,15 @@ The two are independent - run either, or both.
 
 ### Scoreboard and stat-tracker support (optional)
 
-All five metrics are computed once, into a single provider-neutral mission summary, and that one summary feeds every supported mod. Four are supported:
+All five metrics are computed once, into a single provider-neutral mission summary, and that one summary feeds every supported mod. Five are supported:
 
-| Mod | Verified against | Shows the metrics in | Keeps mission history |
-| --- | --- | --- | --- |
-| [Scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/22) | 22-2-17 | Tactical Overlay and the end-of-mission screen | no |
-| `vt2_scoreboard` | v7 | its overlay and the end-of-mission view | no |
-| `scores` (formerly `scoreboard-ii`) | 1.0 and 18.3 | Tactical Overlay, end-of-mission screen, and its history view | yes |
-| `Power_DI` | 1.1.21 | its own reporting UI | yes |
+| Mod                                                                                        | Verified against | Shows the metrics in | Keeps mission history |
+|--------------------------------------------------------------------------------------------| --- | --- | --- |
+| [Scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/22)                       | 22-2-17 | Tactical Overlay and the end-of-mission screen | no |
+| [vt2_scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/887)                  | v7 | its overlay and the end-of-mission view | no |
+| [scores (formerly scoreboard-ii)](https://www.nexusmods.com/warhammer40kdarktide/mods/872) | 1.0 and 18.3 | Tactical Overlay, end-of-mission screen, and its history view | yes |
+| [Power_DI](https://www.nexusmods.com/warhammer40kdarktide/mods/281)                        | 1.1.21 | its own reporting UI | yes |
+| [Another Scoreboard](https://www.nexusmods.com/warhammer40kdarktide/mods/1203)             | External Stats API v1 | Tab scoreboard, end-of-mission screen, and its history view | yes |
 
 Every adapter is optional and detected at runtime. Installing none of these mods changes nothing, and installing several is fine - each one is written independently, so they cannot corrupt one another's values.
 
@@ -133,6 +134,16 @@ One summary row per player per mission is written into a Power_DI datasource, an
   There is a *Clear user report templates* option that would force the automatic seeding instead, but it needs a game restart to take effect and discards every report you have customised, so the manual route above is the better one.
 * Power_DI does not persist solo/offline sessions at all - that is its own behaviour, not something this mod controls.
 
+#### Another Scoreboard
+
+The metrics are published through Another Scoreboard's public External Stats API (v1), into a collapsible *Overflow Meter* section of its own, after Another Scoreboard's built-in sections. The group starts expanded; on the end-of-mission screen and in the history view it can still be collapsed through its `−` heading. Rendering, ranking, formatting, the end-of-mission screen, and the saved mission history are all Another Scoreboard's own - this mod only publishes values.
+
+* **Only the official API is used.** The adapter is active only when Another Scoreboard reports `external_stats_api_version == 1`, so releases without the API are simply ignored, and none of its internals are hooked.
+* **Values are published as totals** (`set`), so a repeated update or a second final collection can never double-count. All rows rank "higher is better", for the same reason as on Scoreboard, and Efficiency is shown with a `%` suffix.
+* **Players without data stay empty.** Only players this mod has a summary for get a value; everyone else shows Another Scoreboard's `—` and is left out of its ranking.
+* **Rows follow the five checkboxes.** The API cannot remove a single row, so changing a checkbox registers the group again with the new row set and immediately republishes the current totals. Disabling Overflow Meter removes the group, and re-enabling it brings it back.
+* **Final values are collected on request.** Another Scoreboard asks for them right before it writes the mission into its history, so the saved entry holds the finished mission.
+
 #### Mods deliberately not integrated
 
 **Uptime 2** needs no adapter, and does not have one on purpose. Its buff tracking is generic and event-based, so Power Overflow and Born Leader already appear there as buffs with their own uptime timelines - which is the one view this mod does not provide. The two are complementary: Uptime answers *how long the talent was active*, this mod answers *how much Toughness that produced*.
@@ -152,7 +163,7 @@ What this does and does not do:
 * **Both players need Overflow Meter.** A teammate's column is only filled if they run the mod too. Players without it publish nothing, and their column behaves exactly as it does today.
 * **This does not make any number more accurate.** The server reports the shared amount to nobody - including the sharing player's own client - so a teammate's published figures are their client's estimate, produced by the same inference code with the same error bars described under [Limitations](#limitations). The `~` markers apply to every column, not just yours.
 * **Only players who queued together as a party are reached.** Presence replicates across the Immaterium *party*, which is not the same set as the players in your mission. In quickplay with strangers there is nobody to exchange with, and the board looks exactly as it does without this feature.
-* **You do not both need the same scoreboard mod.** What travels between clients is the mission summary itself, not any particular mod's rows. One of you can be on Scoreboard and the other on Scores, VT2 Scoreboard, Power_DI, or none of them at all.
+* **You do not both need the same scoreboard mod.** What travels between clients is the mission summary itself, not any particular mod's rows. One of you can be on Scoreboard and the other on Scores, VT2 Scoreboard, Power_DI, Another Scoreboard, or none of them at all.
 * **Only mission statistics are published**, in a payload of about 75 bytes. Presence is readable by any account holding a member's account id, so nothing else is ever put on it. The mod never publishes a value over 250 bytes, because the backend rejects any presence value above 256 and responds by dropping the whole presence stream.
 
 Turning `Share mission summary` off clears the published value; you will still read and display the totals of teammates who share theirs.
