@@ -1,6 +1,6 @@
 local mod = get_mod("OverflowMeter")
 
-mod.version = "1.3.0"
+mod.version = mod.get_metadata and mod:get_metadata("version") or "unknown"
 
 local math_floor = math.floor
 
