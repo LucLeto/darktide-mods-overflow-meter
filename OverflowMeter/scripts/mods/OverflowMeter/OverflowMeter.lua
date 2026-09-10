@@ -106,6 +106,7 @@ mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMet
 mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_vt2_scoreboard")
 mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_scores")
 mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_power_di")
+mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_another_scoreboard")
 
 mod._share = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_share")
 
