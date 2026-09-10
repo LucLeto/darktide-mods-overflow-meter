@@ -1086,7 +1086,7 @@ end
 
 HudElementOverflowMeter._push_scoreboard = function (self, settings)
     local stats_version = Stats.version
-    local settings_version = mod._settings_version
+    local settings_version = mod._snapshot_settings_version
 
     if stats_version == self._last_scoreboard_version and settings_version == self._last_scoreboard_settings_version then
         return

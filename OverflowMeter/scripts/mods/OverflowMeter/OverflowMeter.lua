@@ -56,8 +56,28 @@ local SETTING_IDS = {
     "share_mission_summary"
 }
 
+local CACHED_SETTING_IDS = {}
+
+for i = 1, #SETTING_IDS do
+    CACHED_SETTING_IDS[SETTING_IDS[i]] = true
+end
+
+local SHARE_SETTING_IDS = {
+    share_mission_summary = true
+}
+
+local SNAPSHOT_SETTING_IDS = {
+    rate_mode = true,
+    scoreboard_row_generated = true,
+    scoreboard_row_replenished = true,
+    scoreboard_row_overflowed = true,
+    scoreboard_row_shared = true,
+    scoreboard_row_efficiency = true
+}
+
 mod._settings = settings
 mod._settings_version = 0
+mod._snapshot_settings_version = 0
 mod._reset_requested = false
 mod._summary_held = false
 mod._summary_echoed = false
@@ -73,15 +93,42 @@ local function refresh_settings()
     end
 
     mod._settings_version = mod._settings_version + 1
+    mod._snapshot_settings_version = mod._snapshot_settings_version + 1
 end
 
 refresh_settings()
 
-mod.on_setting_changed = function ()
-    refresh_settings()
+mod.on_setting_changed = function (setting_id)
+    if setting_id == nil then
+        refresh_settings()
 
-    mod._share.refresh()
-    mod._snapshot.refresh()
+        mod._share.refresh()
+        mod._snapshot.refresh()
+
+        return
+    end
+
+    if not CACHED_SETTING_IDS[setting_id] then
+        return
+    end
+
+    local value = mod:get(setting_id)
+
+    if value ~= nil then
+        settings[setting_id] = value
+    end
+
+    mod._settings_version = mod._settings_version + 1
+
+    if SHARE_SETTING_IDS[setting_id] then
+        mod._share.refresh()
+    end
+
+    if SNAPSHOT_SETTING_IDS[setting_id] then
+        mod._snapshot_settings_version = mod._snapshot_settings_version + 1
+
+        mod._snapshot.refresh()
+    end
 end
 
 mod._stats = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_stats")
