@@ -8,6 +8,7 @@ The meter has two styles, selectable in the settings:
 * **Gauge** - a segmented arc that lights up cold-teal to hot-red with the estimated sharing rate, with the `~X.X Toughness/s` value in the centre and a peak marker. The arc's full-scale is generated dynamically from the replenishment sources your build currently has available, so it rescales as sources are added, removed, activated, or deactivated.
 * **Text** - the compact `Sharing: ~X.X Toughness/s` readout used during testing.
 * **Both** (default) - the gauge with the text lines beneath it.
+* **None** - no meter on the HUD. Toughness sharing is still estimated and tracked in the background, so the [mission summary](#mission-summary), the end-of-mission chat line, and the scoreboard rows keep working.
 
 The displayed rate can be shown in one of two units (the `Rate display` setting):
 
@@ -285,7 +286,7 @@ Because these two paths are mutually exclusive - the bar delta below full, the m
 
 ## Settings
 
-`Power Overflow Meter` group: meter style (Gauge / Text / Both), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To turn the meter off entirely, disable the mod through the standard mod toggle.
+`Power Overflow Meter` group: meter style (Gauge / Text / Both / None), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To hide the live meter while keeping all statistics, set `Meter style` to `None`: tracking, the mission summary, the end-of-mission chat line, and the scoreboard rows keep working. Disabling the mod through the standard mod toggle stops tracking as well.
 
 `Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default, applied to every supported scoreboard mod), publishing your totals to teammates running the mod (on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
 
@@ -297,7 +298,7 @@ The meter and the mission summary panel appear as **two independent boxes** in C
 
 * **Move** either one in Custom HUD's edit mode; once a box has been moved there, the mod's own position setting for it stops being applied so the two never fight.
 * **Resize** either one through Custom HUD (drag handle or width field); a size set there takes precedence over the mod's meter-size setting until that box is reset in Custom HUD.
-* **Hide and opacity are per element, not per box.** Custom HUD applies them to the whole HUD element, so hiding either box hides the meter *and* the summary together. To show only one of them, use the mod's own settings - clear the summary keybind and leave `Always show the summary` off, or pick a meter style you want.
+* **Hide and opacity are per element, not per box.** Custom HUD applies them to the whole HUD element, so hiding either box hides the meter *and* the summary together. To show only one of them, use the mod's own settings - clear the summary keybind and leave `Always show the summary` off, or set `Meter style` to `None` to keep only the summary.
 
 Without Custom HUD everything behaves exactly as before - the integration is read-only and never requires the mod.
 

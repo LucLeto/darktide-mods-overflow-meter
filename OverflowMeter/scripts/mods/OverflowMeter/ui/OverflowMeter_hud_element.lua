@@ -54,6 +54,7 @@ local TIER_LOC_KEYS = {
 local METER_STYLE_GAUGE = "gauge"
 local METER_STYLE_TEXT = "text"
 local METER_STYLE_BOTH = "both"
+local METER_STYLE_NONE = "none"
 
 local CUSTOM_HUD_MOD_NAME = "custom_hud"
 local CUSTOM_HUD_NODE_KEY = "HudElementOverflowMeter|overflow_meter"
@@ -849,7 +850,7 @@ HudElementOverflowMeter._refresh_display = function (self, settings)
     local widget = self._widgets_by_name.meter
     local content = widget.content
 
-    if estimator.state == STATE_INACTIVE and not settings.show_inactive_state then
+    if not self._show_meter or (estimator.state == STATE_INACTIVE and not settings.show_inactive_state) then
         if content.visible then
             content.visible = false
             widget.dirty = true
@@ -1184,6 +1185,7 @@ HudElementOverflowMeter._apply_display_settings = function (self, settings)
     local show_gauge = meter_style == METER_STYLE_GAUGE or meter_style == METER_STYLE_BOTH
     local show_text = meter_style == METER_STYLE_TEXT or meter_style == METER_STYLE_BOTH
 
+    self._show_meter = meter_style ~= METER_STYLE_NONE
     self._show_gauge = show_gauge
     self._show_text = show_text
 
