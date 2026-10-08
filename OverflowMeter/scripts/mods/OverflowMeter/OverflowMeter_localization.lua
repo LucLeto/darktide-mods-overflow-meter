@@ -1,3 +1,15 @@
+--- Overflow Meter's DMF localization table for all twelve supported languages.
+-- Returns a table from localization id to a table of texts by language code; DMF resolves
+-- `mod:localize(id)` against it. It holds the mod name and description, the settings titles,
+-- tooltips and dropdown options, the meter's state, context and flash texts, the mission
+-- summary panel and chat line, and the scoreboard row labels.
+--
+-- Loaded by DMF as `mod_localization`, as declared in `OverflowMeter.mod`. Texts with
+-- arguments are `string.format` patterns, so a literal percent sign is written `%%`.
+-- module: OverflowMeter_localization
+-- author: LucLeto
+--- Talent names in the player's game language, taken from the game's own localization.
+-- Each falls back to the English name when `Localize` is missing or returns its key unresolved.
 local POWER_OVERFLOW = Localize and Localize("loc_talent_cryptic_shared_toughness")
 
 if type(POWER_OVERFLOW) ~= "string" or POWER_OVERFLOW == "" or POWER_OVERFLOW:find("loc_talent", 1, true) then
@@ -1110,6 +1122,20 @@ return {
         ko = "외침: 아군당 ~%d 강인함",
         ["zh-cn"] = "战吼：每名队友 ~%d 韧性",
         ["zh-tw"] = "戰吼：每名隊友 ~%d 韌性",
+    },
+    ctx_burst_discharge = {
+        en = "Discharge: ~%d Toughness per ally",
+        fr = "Décharge : ~%d de Robustesse par allié",
+        de = "Entladung: ~%d Zähigkeit pro Verbündetem",
+        it = "Scarica: ~%d Resistenza per alleato",
+        es = "Descarga: ~%d de Dureza por aliado",
+        pl = "Wyładowanie: ~%d Wytrzymałości na sojusznika",
+        ["pt-br"] = "Descarga: ~%d de Resistência por aliado",
+        ru = "Разряд: ~%d Стойкости на союзника",
+        ja = "放電: 味方1人あたり ~%d タフネス",
+        ko = "방전: 아군당 ~%d 강인함",
+        ["zh-cn"] = "放电：每名队友 ~%d 韧性",
+        ["zh-tw"] = "放電：每名隊友 ~%d 韌性",
     },
     state_inactive = {
         en = "Inactive",

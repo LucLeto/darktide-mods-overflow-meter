@@ -1,3 +1,14 @@
+--- Overflow Meter's DMF mod data; the mod description and the whole settings menu.
+-- The returned table names the mod and declares every option widget in two groups: the live
+-- meter (style, texts, rate unit and averaging window, position, size and opacity) and the
+-- mission summary (hold keybind, permanent display, end-of-mission chat line, one checkbox per
+-- scoreboard row, summary sharing and the panel position). Every widget names its tooltip
+-- explicitly as `<setting_id>_tooltip`.
+--
+-- Loaded by DMF as `mod_data`, as declared in `OverflowMeter.mod`. The defaults are mirrored in
+-- the settings cache of `OverflowMeter.lua`; keep both in sync.
+-- module: OverflowMeter_data
+-- author: LucLeto
 local mod = get_mod("OverflowMeter")
 
 return {
@@ -121,6 +132,7 @@ return {
                 type = "group",
                 tooltip = "mission_summary_group_tooltip",
                 sub_widgets = {
+                    -- Calls `mod.hold_mission_summary` with the pressed state on press and release.
                     {
                         setting_id = "summary_keybind",
                         type = "keybind",
