@@ -5,7 +5,7 @@
 -- Every setting is cached in `mod._settings` and refreshed per changed id. The modules are
 -- loaded in dependency order through `mod:io_dofile` and stored on `mod`: the mission
 -- statistics, the Skitarii and Veteran sources and pulses, the scoreboard snapshot with its
--- optional adapters, and mission summary sharing. The HUD element
+-- optional adapters, mission summary sharing and the Session Stats rows. The HUD element
 -- (`ui/OverflowMeter_hud_element.lua`) is registered last and reaches everything through these
 -- `mod` fields.
 --
@@ -51,7 +51,11 @@ local settings = {
     scoreboard_row_shared = true,
     scoreboard_row_efficiency = true,
     summary_chat_on_end = true,
-    share_mission_summary = true
+    share_mission_summary = true,
+    session_stats_rows = true,
+    session_stats_row_1 = "generated",
+    session_stats_row_2 = "shared",
+    session_stats_row_3 = "efficiency"
 }
 
 --- Every setting id mirrored into the cache.
@@ -78,7 +82,11 @@ local SETTING_IDS = {
     "scoreboard_row_shared",
     "scoreboard_row_efficiency",
     "summary_chat_on_end",
-    "share_mission_summary"
+    "share_mission_summary",
+    "session_stats_rows",
+    "session_stats_row_1",
+    "session_stats_row_2",
+    "session_stats_row_3"
 }
 
 --- Lookup set of `SETTING_IDS`, so a change to an uncached setting (the keybind) is ignored.
@@ -206,6 +214,9 @@ mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMet
 mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_another_scoreboard")
 
 mod._share = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_share")
+
+-- Optional rows in the game's own Session Stats panel on the end-of-round screen.
+mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_session_stats")
 
 -- ----------------------------------------------------------------------------
 -- Shared hooks
