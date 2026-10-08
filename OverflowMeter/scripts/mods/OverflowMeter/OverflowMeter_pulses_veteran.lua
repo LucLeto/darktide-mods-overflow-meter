@@ -35,6 +35,8 @@ local Pulses = {
     confirmed_kill_regen_until = 0,
     last_ranged_wield_t = 0,
     last_melee_wield_t = 0,
+    focus_target_unit = nil,
+    focus_target_until = 0,
 }
 
 local function _has_talent_buff(talent_extension, buff_template_name)
@@ -79,6 +81,8 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.confirmed_kill_regen_until = 0
     Pulses.last_ranged_wield_t = 0
     Pulses.last_melee_wield_t = 0
+    Pulses.focus_target_unit = nil
+    Pulses.focus_target_until = 0
 end
 
 Pulses.disable = function()
@@ -105,6 +109,8 @@ Pulses.disable = function()
     Pulses.confirmed_kill_regen_until = 0
     Pulses.last_ranged_wield_t = 0
     Pulses.last_melee_wield_t = 0
+    Pulses.focus_target_unit = nil
+    Pulses.focus_target_until = 0
 end
 
 Pulses.consume = function()
@@ -288,6 +294,10 @@ local function _focus_target_stacks()
 end
 
 local function _tagged_by_local_player(attacked_unit)
+    if attacked_unit == Pulses.focus_target_unit and _now() < Pulses.focus_target_until then
+        return true
+    end
+
     local state_managers = Managers.state
     local extension_manager = state_managers and state_managers.extension
     local smart_tag_system = extension_manager and extension_manager.system and extension_manager:system("smart_tag_system")
@@ -392,6 +402,10 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 
     if Pulses.has_target_down and attacked_unit and _tagged_by_local_player(attacked_unit) then
+        if attacked_unit == Pulses.focus_target_unit then
+            Pulses.focus_target_unit = nil
+        end
+
         local stacks = _focus_target_stacks()
 
         if stacks > 0 then
@@ -400,7 +414,41 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 end
 
-mod:hook_safe(CLASS.ActionVeteranCombatAbility, "start", function(self, action_settings, t, time_scale, action_start_params)
+mod:hook_safe(CLASS.SmartTagSystem, "_create_tag_locally", function(self, tag_id, template_name, tagger_unit, target_unit)
+    if not Pulses.enabled or not Pulses.has_target_down or tagger_unit ~= Pulses.unit or not target_unit or template_name ~= Sources.target_down_tag_name then
+        return
+    end
+
+    Pulses.focus_target_unit = target_unit
+    Pulses.focus_target_until = _now() + Sources.target_down_tag_duration
+end)
+
+local function _on_your_toes(t, is_ranged, is_melee)
+    local stacks = _weapon_switch_stacks()
+
+    if stacks <= 0 then
+        return
+    end
+
+    local cooldown = Sources.on_your_toes_cooldown
+
+    if is_ranged and t > Pulses.last_ranged_wield_t + cooldown then
+        Pulses.last_ranged_wield_t = t
+
+        _add_pulse(Sources.on_your_toes_fraction, true)
+    elseif is_melee and t > Pulses.last_melee_wield_t + cooldown then
+        Pulses.last_melee_wield_t = t
+
+        _add_pulse(Sources.on_your_toes_fraction, true)
+    end
+end
+
+mod:hook(CLASS.ActionVeteranCombatAbility, "start", function(func, self, action_settings, t, time_scale, action_start_params)
+    local inventory_component = self._inventory_component
+    local wielded_slot_before = inventory_component and inventory_component.wielded_slot
+
+    func(self, action_settings, t, time_scale, action_start_params)
+
     if not Pulses.enabled or self._player_unit ~= Pulses.unit then
         return
     end
@@ -412,6 +460,10 @@ mod:hook_safe(CLASS.ActionVeteranCombatAbility, "start", function(self, action_s
         _add_burst()
     elseif (class_tag == "ranger" or class_tag == "base") and Pulses.has_executioners_stance then
         Pulses.stance_active_until = t + _stance_duration()
+    end
+
+    if Pulses.has_on_your_toes and tweak_data and tweak_data.wield_secondary_slot and wielded_slot_before and wielded_slot_before ~= "slot_secondary" then
+        _on_your_toes(t, true, false)
     end
 end)
 
@@ -457,23 +509,7 @@ mod:hook_safe(CLASS.ActionUnwield, "start", function(self, action_settings, t, t
         return
     end
 
-    local stacks = _weapon_switch_stacks()
-
-    if stacks <= 0 then
-        return
-    end
-
-    local cooldown = Sources.on_your_toes_cooldown
-
-    if is_ranged and t > Pulses.last_ranged_wield_t + cooldown then
-        Pulses.last_ranged_wield_t = t
-
-        _add_pulse(Sources.on_your_toes_fraction, true)
-    elseif is_melee and t > Pulses.last_melee_wield_t + cooldown then
-        Pulses.last_melee_wield_t = t
-
-        _add_pulse(Sources.on_your_toes_fraction, true)
-    end
+    _on_your_toes(t, is_ranged, is_melee)
 end)
 
 return Pulses

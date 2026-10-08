@@ -9,10 +9,12 @@ local math_min = math.min
 local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local FULL_TOUGHNESS_EPSILON = 0.999
+local COMBAT_ABILITY_TYPE = "combat_ability"
 
 local Pulses = {
     enabled = false,
     pending_fraction = 0,
+    pending_burst_fraction = 0,
     pending_overflow = 0,
     unit = nil,
     buff_extension = nil,
@@ -45,6 +47,7 @@ end
 Pulses.disable = function()
     Pulses.enabled = false
     Pulses.pending_fraction = 0
+    Pulses.pending_burst_fraction = 0
     Pulses.pending_overflow = 0
     Pulses.unit = nil
     Pulses.buff_extension = nil
@@ -60,6 +63,14 @@ Pulses.consume = function()
     Pulses.pending_fraction = 0
 
     return pending_fraction
+end
+
+Pulses.consume_burst_fraction = function()
+    local pending_burst_fraction = Pulses.pending_burst_fraction
+
+    Pulses.pending_burst_fraction = 0
+
+    return pending_burst_fraction
 end
 
 Pulses.consume_overflow = function()
@@ -90,7 +101,7 @@ local function _accumulate_overflow(fraction)
     end
 end
 
-local function _add_pulse(fraction, apply_replenish_stat_buffs)
+local function _add_pulse(fraction, apply_replenish_stat_buffs, as_burst)
     if not fraction or fraction <= 0 then
         return
     end
@@ -107,7 +118,11 @@ local function _add_pulse(fraction, apply_replenish_stat_buffs)
     _accumulate_overflow(fraction)
 
     if _is_full() then
-        Pulses.pending_fraction = Pulses.pending_fraction + fraction
+        if as_burst then
+            Pulses.pending_burst_fraction = Pulses.pending_burst_fraction + fraction
+        else
+            Pulses.pending_fraction = Pulses.pending_fraction + fraction
+        end
     end
 end
 
@@ -200,6 +215,29 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 end
 
+local function _discharge_charges(action)
+    local max_charges = Sources.discharge_max_charges
+    local buff_extension = action._buff_extension
+
+    if buff_extension and buff_extension.has_keyword and buff_extension:has_keyword(Sources.discharge_full_charges_keyword) then
+        return max_charges
+    end
+
+    local charges = action._ability_cost_at_start
+
+    if type(charges) ~= "number" or charges < 1 then
+        local ability_extension = action._ability_extension
+
+        charges = ability_extension and ability_extension.ability_charges_used_on_activation and ability_extension:ability_charges_used_on_activation(COMBAT_ABILITY_TYPE)
+    end
+
+    if type(charges) ~= "number" or charges < 1 then
+        return 1
+    end
+
+    return math_min(charges, max_charges)
+end
+
 mod:hook_safe(CLASS.ActionCrypticDischarge, "start", function(self, action_settings, t, time_scale, action_start_params)
     if not Pulses.enabled or self._player_unit ~= Pulses.unit then
         return
@@ -208,7 +246,7 @@ mod:hook_safe(CLASS.ActionCrypticDischarge, "start", function(self, action_setti
     local talent_extension = self._talent_extension
 
     if talent_extension and talent_extension.has_special_rule and talent_extension:has_special_rule(Sources.discharge_restore_special_rule) then
-        _add_pulse(Sources.discharge_use_fraction, true)
+        _add_pulse(Sources.discharge_use_fraction * _discharge_charges(self), true, true)
     end
 end)
 

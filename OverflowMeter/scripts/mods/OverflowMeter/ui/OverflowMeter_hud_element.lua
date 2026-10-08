@@ -29,12 +29,14 @@ local ARCHETYPES = {
     cryptic = {
         talent_buff = "cryptic_shared_toughness",
         talent_id = "cryptic_shared_toughness",
-        title_key = "hud_title"
+        title_key = "hud_title",
+        burst_key = "ctx_burst_discharge"
     },
     veteran = {
         talent_buff = "veteran_share_toughness_gained",
         talent_id = "veteran_allies_in_coherency_share_toughness_gain",
-        title_key = "hud_title_veteran"
+        title_key = "hud_title_veteran",
+        burst_key = "ctx_burst_share"
     },
 }
 
@@ -565,6 +567,10 @@ HudElementOverflowMeter._check_supported = function (self, settings)
         local talents = profile and profile.talents
         local points = talents and talents[archetype_config.talent_id]
 
+        if type(points) == "table" then
+            points = points.tier
+        end
+
         has_talent = points ~= nil and points ~= 0
     end
 
@@ -669,6 +675,19 @@ HudElementOverflowMeter._consume_bar_gain = function (self, toughness_damage, ma
     return bar_gain
 end
 
+HudElementOverflowMeter._update_burst_flash = function (self, burst_share, allies, ally_multiplier)
+    if burst_share > 0 then
+        if allies > 0 then
+            self._estimator:register_burst(burst_share * ally_multiplier / SAMPLE_INTERVAL)
+        end
+
+        self._burst_flash_amount = burst_share
+        self._burst_flash_remaining = BURST_FLASH_SAMPLES
+    elseif self._burst_flash_remaining > 0 then
+        self._burst_flash_remaining = self._burst_flash_remaining - 1
+    end
+end
+
 HudElementOverflowMeter._sample = function (self)
     if self._archetype == ARCHETYPE_VETERAN then
         self:_sample_veteran()
@@ -739,12 +758,16 @@ HudElementOverflowMeter._sample = function (self)
         pulse_offered_per_second = pending_pulse_fraction * max_toughness * sources.share_fraction * ally_multiplier / SAMPLE_INTERVAL
     end
 
+    local pending_burst_fraction = pulses.consume_burst_fraction()
+
+    self:_update_burst_flash(pending_burst_fraction * max_toughness * sources.share_fraction, allies, ally_multiplier)
+
     local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * sources.share_fraction * ally_multiplier
 
     self._estimator:sample(is_full, total_rate > 0, share_per_ally_per_second * ally_multiplier, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
 
     local stats_overflow = pulses.consume_overflow()
-    local stats_shareable = pending_pulse_fraction > 0 and pending_pulse_fraction * max_toughness or 0
+    local stats_shareable = (pending_pulse_fraction + pending_burst_fraction) * max_toughness
 
     if is_full and total_rate > 0 then
         local continuous_amount = total_rate * max_toughness * replenish_multiplier * SAMPLE_INTERVAL
@@ -813,18 +836,7 @@ HudElementOverflowMeter._sample_veteran = function (self)
         end
     end
 
-    local burst_share = pulses.consume_burst()
-
-    if burst_share > 0 then
-        if allies > 0 then
-            self._estimator:register_burst(burst_share * ally_multiplier / SAMPLE_INTERVAL)
-        end
-
-        self._burst_flash_amount = burst_share
-        self._burst_flash_remaining = BURST_FLASH_SAMPLES
-    elseif self._burst_flash_remaining > 0 then
-        self._burst_flash_remaining = self._burst_flash_remaining - 1
-    end
+    self:_update_burst_flash(pulses.consume_burst(), allies, ally_multiplier)
 
     local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * share_fraction * ally_multiplier
 
@@ -1010,7 +1022,9 @@ HudElementOverflowMeter._refresh_text = function (self, settings, display_state)
     end
 
     if burst_active then
-        context_text = mod:localize("ctx_burst_share", burst_amount)
+        local archetype_config = ARCHETYPES[self._archetype]
+
+        context_text = mod:localize(archetype_config and archetype_config.burst_key or "ctx_burst_share", burst_amount)
     end
 
     local dirty = false

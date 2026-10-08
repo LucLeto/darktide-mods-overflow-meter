@@ -18,7 +18,7 @@ local MAX_INBOUND_BYTES = 1024
 
 local PUBLISH_INTERVAL = 2
 
-local DEBUG_MEMBERS = true
+local DEBUG_MEMBERS = false
 
 local Share = {}
 

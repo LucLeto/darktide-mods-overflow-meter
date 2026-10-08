@@ -45,6 +45,7 @@ local STANCE_REFRESH_RULE = "veteran_combat_ability_outlined_kills_extends_durat
 
 local ON_YOUR_TOES_RULE = "veteran_weapon_switch_replenish_toughness"
 local TARGET_DOWN_RULE = "veteran_improved_tag_dead_bonus"
+local TARGET_DOWN_TAG_NAME = "enemy_over_here_veteran"
 
 local WEAPON_TOUGHNESS_PROC_TEMPLATES = {
     -- Continuous fire
@@ -54,6 +55,7 @@ local WEAPON_TOUGHNESS_PROC_TEMPLATES = {
     weapon_trait_bespoke_dual_autopistols_p1_toughness_on_continuous_fire = true,
     weapon_trait_bespoke_bolter_p1_toughness_on_continuous_fire = true,
     weapon_trait_bespoke_shotgun_p4_toughness_on_continuous_fire = true,
+    weapon_trait_bespoke_shotgun_p3_toughness_on_continuous_fire = true,
     -- Elite / crit / close-range kills
     weapon_trait_bespoke_bolter_p1_toughness_on_elite_kills = true,
     weapon_trait_bespoke_boltpistol_p1_toughness_on_elite_kills = true,
@@ -67,6 +69,8 @@ local WEAPON_TOUGHNESS_PROC_TEMPLATES = {
     weapon_trait_bespoke_needlepistol_p1_toughness_on_crit_kills = true,
     weapon_trait_bespoke_dual_stubpistols_p1_toughness_on_close_range_kills = true,
     weapon_trait_bespoke_shotgun_p4_toughness_on_close_range_kills = true,
+    weapon_trait_bespoke_shotgun_p3_toughness_on_close_range_kills = true,
+    weapon_trait_bespoke_shotgun_p3_toughness_on_elite_kills = true,
     -- Melee specials / chained hits
     weapon_trait_bespoke_chainsword_2h_p1_toughness_recovery_on_multiple_hits = true,
     weapon_trait_bespoke_forcesword_2h_p1_toughness_recovery_on_multiple_hits = true,
@@ -85,6 +89,7 @@ local CONTINUOUS_FIRE_TEMPLATES = {
     weapon_trait_bespoke_dual_autopistols_p1_toughness_on_continuous_fire = true,
     weapon_trait_bespoke_bolter_p1_toughness_on_continuous_fire = true,
     weapon_trait_bespoke_shotgun_p4_toughness_on_continuous_fire = true,
+    weapon_trait_bespoke_shotgun_p3_toughness_on_continuous_fire = true,
 }
 
 local function _has_talent_buff(talent_extension, buff_template_name)
@@ -190,4 +195,6 @@ return {
     target_down_fraction_per_stack = 0.05,
     target_down_max_stacks = target_down_max_stacks,
     target_down_talent_rule = TARGET_DOWN_RULE,
+    target_down_tag_name = TARGET_DOWN_TAG_NAME,
+    target_down_tag_duration = 25,
 }

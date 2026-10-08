@@ -203,7 +203,7 @@ Complete reference of Skitarius Toughness replenishment. Any replenishment that 
 | Name | Icon | Mechanics |
 | --- | --- | --- |
 | Restoration Protocol | <img src="https://images.steamusercontent.com/ugc/11694792458731858273/FB16AD950E6F30E71342FD5021186345FAABA595/" width="44"> | Advanced Combat Doctrines restores 10 % of max Toughness per second for the stance's duration (and clears all suppression on activation). |
-| Voltaic Overcharge | <img src="https://images.steamusercontent.com/ugc/15365734486430885741/DF96D8DD9B0C1DDF467208030A7B8B856AF95E71/" width="44"> | Voltaic Emitter restores 25 % Toughness on use, plus 1 % for each enemy hit by the electric discharge. |
+| Voltaic Overcharge | <img src="https://images.steamusercontent.com/ugc/15365734486430885741/DF96D8DD9B0C1DDF467208030A7B8B856AF95E71/" width="44"> | Voltaic Emitter restores 25 % Toughness per charge spent on use (up to 75 %), plus 1 % for each enemy hit by the electric discharge. |
 | Medicae Servo-Skull (Blitz) | <img src="https://images.steamusercontent.com/ugc/11312963796425562478/2F9E96764EA2004CF8F6C054FD6B4EDD3379F202/" width="44"> | The injected ally is revived and restored 20 % Toughness per second for 5 s (+75 % Toughness damage reduction), restores the ally, not the Skitarius. |
 
 ### Keystone Nodes
@@ -223,7 +223,7 @@ Complete reference of Skitarius Toughness replenishment. Any replenishment that 
 | Reassuringly Accurate | <img src="https://images.steamusercontent.com/ugc/2520411179232525014/3BAF122DC6B64673C7A062D257BB3E06F989FBD6/" width="44"> | Critical hit kills restore Toughness, Laspistol: 10 / 12 / 14 / 16 %. |
 | Gloryhunter | <img src="https://images.steamusercontent.com/ugc/2524914144960338357/8ADA540685A2930E2E6A035BEFB1A6ADCAFFA3DA/" width="44"> | Elite kills restore Toughness, Galvanic Rifle: 10–16 %, Phosphor Blast Pistol: 17.5–25 %, Plasma Gun: 17.5–25 %, Stub Revolver: 18–30 % per tier. |
 
-The meter currently estimates all of the above except Data Sensor Protocol and the self-restores of Voltaic Restoration and Invigorating Overload (no reliable client-side trigger yet); ally-targeted restores and coherency regeneration are excluded by design because they cannot feed Power Overflow.
+The meter currently estimates all of the above except Data Sensor Protocol and the self-restores of Voltaic Restoration and Invigorating Overload (no reliable client-side trigger yet); ally-targeted restores and coherency regeneration are excluded by design because they cannot feed Power Overflow. A Voltaic Overcharge restore that lands at full Toughness is surfaced as a brief `Discharge: ~X Toughness per ally` flash and a peak-marker spike rather than folding into the sustained rate.
 
 ## Veteran (Born Leader) replenishment sources
 
@@ -252,7 +252,7 @@ Complete reference of Veteran Toughness replenishment. Born Leader shares **20 %
 | Name | Icon | Mechanics |
 | --- | --- | --- |
 | Executioner's Stance | <img src="https://images.steamusercontent.com/ugc/2315475838576767639/6BD53F8265A160514869473870732E2B2B4EC256/" width="44"> | While in Ranged Stance, replenishes 10 % Toughness per second for the stance's duration (6 s, or 9 s with Master of the Killing Zone; refreshed by highlighted kills with Superiority Complex). Only the upgraded **Executioner's Stance** regenerates - the base *Volley Fire* node grants the damage bonuses without any Toughness. |
-| Voice of Command | <img src="https://images.steamusercontent.com/ugc/2315475838576767602/3FA6B49FFBE084BCEE5EE80BC7BE978F6141846A/" width="44"> | On use, replenishes your maximum Toughness and staggers nearby enemies. Shares 20 % of your maximum Toughness to each ally in Coherency, even at full Toughness. With **Duty and Honour** it additionally grants +50 bonus Toughness to you and Coherency allies for 10 s - that bonus raises maximum Toughness instead of replenishing it, so Born Leader does not share it. |
+| Voice of Command | <img src="https://images.steamusercontent.com/ugc/2315475838576767602/3FA6B49FFBE084BCEE5EE80BC7BE978F6141846A/" width="44"> | On use, replenishes your maximum Toughness and staggers nearby enemies. Shares 20 % of your maximum Toughness to each ally in Coherency, even at full Toughness. With **Duty and Honour** it additionally grants +75 bonus Toughness to you and Coherency allies for 10 s - that bonus raises maximum Toughness instead of replenishing it, so Born Leader does not share it. |
 | Infiltrate | <img src="https://images.steamusercontent.com/ugc/2315475838576767575/AE60D2F78CEA91B4FCFDBF97F09E4D403B841EE1/" width="44"> | On use, replenishes your maximum Toughness and enters Stealth. Shares 20 % of your maximum Toughness to each ally in Coherency, even at full Toughness. |
 
 ### Keystone Nodes
@@ -273,16 +273,17 @@ The keystones' other Toughness-adjacent upgrades are **not** feeders: Redirect F
 | --- | --- | --- |
 | Inspiring Barrage | <img src="https://images.steamusercontent.com/ugc/2524914144964040721/7C232C64AF6B5882CB9F0450F6947F075EB7137C/" width="44"> | During continuous fire, every 10 % of the magazine spent replenishes Toughness per stack (max 5), Autopistol / Braced Autogun / Bolter: 1 / 2 / 3 / 4 % per stack (up to 20 %). |
 | Reassuringly Accurate | <img src="https://images.steamusercontent.com/ugc/2520411179232525014/3BAF122DC6B64673C7A062D257BB3E06F989FBD6/" width="44"> | Critical hit kills replenish Toughness, Laspistol: 10 / 12 / 14 / 16 %. |
-| Gloryhunter | <img src="https://images.steamusercontent.com/ugc/2524914144960338357/8ADA540685A2930E2E6A035BEFB1A6ADCAFFA3DA/" width="44"> | Elite kills replenish Toughness, Bolter: 10–16 %, Bolt Pistol: 18–30 %, Plasma Gun: 17.5–25 %, Stub Revolver: 18–30 % per tier. |
+| Gloryhunter | <img src="https://images.steamusercontent.com/ugc/2524914144960338357/8ADA540685A2930E2E6A035BEFB1A6ADCAFFA3DA/" width="44"> | Elite kills replenish Toughness, Bolter: 10–16 %, Bolt Pistol: 18–30 %, Huntsman's Shotgun: 10–16 %, Plasma Gun: 17.5–25 %, Stub Revolver: 18–30 % per tier. |
+| Born in Blood | <img src="https://images.steamusercontent.com/ugc/2524914144952512518/D88A8CC0216C784F5B1E781E5333F863F64F83A3/" width="44"> | Ranged kills of enemies within 12.5 m replenish Toughness, Huntsman's Shotgun: 4.5 / 5 / 5.5 / 6 %. |
 
 The meter measures continuous sharing below full Toughness from your own replicated Toughness-bar delta (20 % × recovered Toughness), which is source-agnostic: it covers coherency regeneration and every self-replenish without a per-source model - coherency regen, Catch a Breath, Executioner's Stance, Field Improvisation, continuous-fire blessings, and the self-portion of keystone upgrades such as Target Down! and On Your Toes are all captured automatically, already scaled by any Tunnel Vision multiplier. Discrete pulses (kills, blessings) add only their clamp overflow so they are never double-counted against the bar, and Voice of Command / Infiltrate are surfaced as a brief `Shout: ~X Toughness per ally` flash and a peak-marker spike rather than folding into the sustained rate. Ally-targeted restores such as **Covering Fire** (which replenishes nearby allies directly, not you) are excluded by design because they cannot feed Born Leader.
 
 At full Toughness the bar is static, so the meter switches to modelling the sources instead:
 
-* **Discrete self-replenishes** are inferred from their trigger events - kills, weapon-blessing procs and shouts, plus **Target Down!** (when you kill your own Tagged enemy, scaled by your current Focus Target stacks) and **On Your Toes** (read at the weapon swap from your replicated Specialist stack count, honouring the game's 3 s per-side cooldown).
+* **Discrete self-replenishes** are inferred from their trigger events - kills, weapon-blessing procs and shouts, plus **Target Down!** (when you kill your own Tagged enemy, scaled by your current Focus Target stacks; still counted when a teammate re-tags your Focus Target) and **On Your Toes** (read at the weapon swap from your replicated Specialist stack count, including the automatic draw when Volley Fire / Executioner's Stance pulls out your ranged weapon, honouring the game's 3 s per-side cooldown).
 * **Continuous talent regeneration** that keeps ticking while already at full is modelled from its own active window: **Executioner's Stance** (10 %/s while the stance is up, extended by highlighted kills when Master of the Killing Zone is taken), **Catch a Breath** (5 %/s once you have not been hit in melee for 5 s) and **Confirmed Kill**'s over-time regeneration (2 %/s for 10 s after an Elite or Specialist kill). All three are scaled by your current replenishment modifiers, so Tunnel Vision and debuffs such as toxic gas are reflected, and they pause while you are disabled.
 
-Because these two paths are mutually exclusive - the bar delta below full, the model at full - nothing is counted twice. The remaining at-full undercount is **Field Improvisation** (1 %/s near your deployed Medi-Pack), which has no reliable client-side signal for the proximity check. Note also that **Duty and Honour**'s +50 bonus Toughness is *not* counted: it raises maximum Toughness rather than replenishing it, so Born Leader does not share it.
+Because these two paths are mutually exclusive - the bar delta below full, the model at full - nothing is counted twice. The remaining at-full undercount is **Field Improvisation** (1 %/s near your deployed Medi-Pack), which has no reliable client-side signal for the proximity check. Note also that **Duty and Honour**'s +75 bonus Toughness is *not* counted: it raises maximum Toughness rather than replenishing it, so Born Leader does not share it.
 
 ## Settings
 
@@ -314,7 +315,7 @@ Power Overflow and Born Leader are processed by the server, and multiplayer clie
 * The server-side Power Overflow proc does not verify who generated the incoming replenishment, so external effects such as another player's Voice of Command can technically trigger sharing while you are full. The client cannot attribute these reliably, so they are deliberately omitted (a small undercount).
 * Kill- and hit-based pulses are inferred from local attack reports and can differ slightly from the server's proc order (for example an explosion hit that kills its target).
 * *(Born Leader)* The continuous regeneration counted while at full Toughness is modelled from talent selection and timers rather than read from the server's buffs, so its active windows are approximations. In particular, Catch a Breath's cooldown is restarted from melee hits that land on you; **blocking** an attack also restarts it in game but is not observable client-side, so the meter can credit a little regeneration that the server did not grant.
-* *(Born Leader)* Field Improvisation's 1 %/s near a deployed Medi-Pack is not counted while at full Toughness (no reliable client-side proximity signal), and Duty and Honour's +50 bonus Toughness is excluded by design because it raises maximum Toughness rather than replenishing it.
+* *(Born Leader)* Field Improvisation's 1 %/s near a deployed Medi-Pack is not counted while at full Toughness (no reliable client-side proximity signal), and Duty and Honour's +75 bonus Toughness is excluded by design because it raises maximum Toughness rather than replenishing it.
 
 ### Mission summary
 
@@ -333,7 +334,7 @@ The summary inherits all of the above, plus:
 
 Talent, ability, keystone, and blessing data and icons are taken from the excellent guides by [kuli](https://steamcommunity.com/id/kulii):
 
-* [\[1.12.x\] Skitarius Talents & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3674757853)
-* [\[1.12.x\] Veteran Talents & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3094038976)
-* [\[1.12.x\] Melee Weapon Blessings & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3286161222)
-* [\[1.12.x\] Ranged Weapon Blessings & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3293278399)
+* [\[1.13.x\] Skitarius Talents & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3674757853)
+* [\[1.13.x\] Veteran Talents & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3094038976)
+* [\[1.13.x\] Melee Weapon Blessings & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3286161222)
+* [\[1.13.x\] Ranged Weapon Blessings & Mechanics](https://steamcommunity.com/sharedfiles/filedetails/?id=3293278399)

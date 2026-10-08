@@ -10,7 +10,7 @@ local share_fraction = shared_toughness_settings and shared_toughness_settings.t
 
 local precision_stance_settings = cryptic_settings.precision_stance
 local precision_stance_toughness_settings = precision_stance_settings and precision_stance_settings.cryptic_precision_stance_toughness_suppression
-local precision_stance_fallback_rate = precision_stance_toughness_settingste and precision_stance_toughness_settings.toughness_regen_per_second or 0.1
+local precision_stance_fallback_rate = precision_stance_toughness_settings and precision_stance_toughness_settings.toughness_regen_per_second or 0.1
 
 local per_charge_settings = cryptic_settings.cryptic_toughness_per_charge
 local per_charge_fallback_base_rate = per_charge_settings and per_charge_settings.toughness_regen_per_second or 0.03
@@ -33,6 +33,7 @@ local dissector_settings = cryptic_settings.dissector
 local dissector_kill_fraction = dissector_settings and dissector_settings.toughness_regen_percent_per_elite_or_special_kill or 0.15
 
 local discharge_ability_settings = cryptic_settings.discharge_ability
+local discharge_max_charges = discharge_ability_settings and discharge_ability_settings.max_charges or 3
 local discharge_toughness_settings = discharge_ability_settings and discharge_ability_settings.cryptic_discharge_toughness
 local discharge_use_fraction = discharge_toughness_settings and discharge_toughness_settings.toughness_percent_on_use or 0.25
 local discharge_hit_fraction = discharge_toughness_settings and discharge_toughness_settings.toughness_percent_per_hit or 0.01
@@ -43,9 +44,7 @@ local TOUGHNESS_PER_CHARGE_BUFF_NAME = "cryptic_toughness_per_charge"
 local RANGED_STACKING_BUFF_NAME = "cryptic_ranged_stacking_toughness_stack"
 
 local PRECISION_STANCE_BUFF_NAMES = {
-    "cryptic_precision_stance_one_charge",
-    "cryptic_precision_stance_two_charges",
-    "cryptic_precision_stance_three_charges"
+    "cryptic_precision_stance_one_charge"
 }
 
 local TEMPORARY_REGEN_BUFF_NAMES = {
@@ -335,6 +334,8 @@ return {
     dissector_kill_fraction = dissector_kill_fraction,
     discharge_use_fraction = discharge_use_fraction,
     discharge_hit_fraction = discharge_hit_fraction,
+    discharge_max_charges = discharge_max_charges,
+    discharge_full_charges_keyword = "cryptic_discharge_ability_always_full_charges_bonus",
     discharge_damage_profile_name = "cryptic_discharge_explosion",
     discharge_restore_special_rule = special_rules.cryptic_discharge_restores_toughness_on_use or "cryptic_discharge_restores_toughness_on_use",
     weakspot_talent_buff_name = "cryptic_weakspot_kills_restore_toughness",
