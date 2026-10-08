@@ -1,3 +1,15 @@
+--- Overflow Meter's DMF localization table for all twelve supported languages.
+-- Returns a table from localization id to a table of texts by language code; DMF resolves
+-- `mod:localize(id)` against it. It holds the mod name and description, the settings titles,
+-- tooltips and dropdown options, the meter's state, context and flash texts, the mission
+-- summary panel and chat line, and the scoreboard row labels.
+--
+-- Loaded by DMF as `mod_localization`, as declared in `OverflowMeter.mod`. Texts with
+-- arguments are `string.format` patterns, so a literal percent sign is written `%%`.
+-- module: OverflowMeter_localization
+-- author: LucLeto
+--- Talent names in the player's game language, taken from the game's own localization.
+-- Each falls back to the English name when `Localize` is missing or returns its key unresolved.
 local POWER_OVERFLOW = Localize and Localize("loc_talent_cryptic_shared_toughness")
 
 if type(POWER_OVERFLOW) ~= "string" or POWER_OVERFLOW == "" or POWER_OVERFLOW:find("loc_talent", 1, true) then
