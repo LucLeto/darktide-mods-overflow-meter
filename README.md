@@ -55,14 +55,15 @@ The current maximum Toughness is used throughout, so temporary increases such as
 
 ### At the end of a mission
 
-The game destroys the whole HUD during mission teardown, before the end-of-round screen opens, so the panel cannot follow you there. Two things can:
+The game destroys the whole HUD during mission teardown, before the end-of-round screen opens, so the panel cannot follow you there. Three things can:
 
 * **A chat line** (`Show the summary in your own chat at mission end`, on by default). When the end-of-round screen opens, the totals are written as a single `mod:echo` line. Chat is one of the few UI layers that stays alive on that screen, so the message is readable there and remains in your chat history.
 
   **Only you see it.** `mod:echo` inserts the line straight into your own chat UI element on the `PRIVATE` channel, stamped `[OverflowMeter]` rather than your character name. It never reaches `ChatManager`'s send path, so no network message exists and no teammate - modded or not - receives anything. The mod does not talk for you.
+* **Rows in the game's own Session Stats panel** (`End-of-round Session Stats`, on by default). Darktide 1.13 added a collapsible Session Stats panel to the end-of-round screen, opened with the prompt below the mission title. The mod appends up to three rows to it, in your own column: Toughness Generated, Shared and Share Efficiency by default, and each of the three slots can show any of the five totals or be turned off. Values marked `~` are estimates. The team column stays empty, because only players running the mod have these values. Three is the limit, because a fourth row would run into the screen's Continue button. No other mod is needed.
 * **Rows in a scoreboard or stat-tracking mod**, described next.
 
-The two are independent - run either, or both.
+The three are independent - run any combination.
 
 ### Scoreboard and stat-tracker support (optional)
 
@@ -291,6 +292,8 @@ Because these two paths are mutually exclusive - the bar delta below full, the m
 
 `Mission summary` group: the hold-to-show keybind (unbound by default), permanent visibility, the end-of-mission chat line (on by default), one checkbox per scoreboard row (Generated / Replenished / Overflowed / Shared / Efficiency, all on by default, applied to every supported scoreboard mod), publishing your totals to teammates running the mod (on by default), and the summary panel's position. The panel reuses the meter's size and opacity settings.
 
+`End-of-round Session Stats` (on by default): adds Overflow Meter rows to the game's own Session Stats panel on the end-of-round screen. Its `Row 1` to `Row 3` dropdowns pick what each row shows (Toughness Generated, Replenished, Overflowed, Shared, Share Efficiency, or Off) and are hidden while the checkbox is off. Rows set to Off are left out without a gap, and a total already shown in an earlier row is not repeated.
+
 ## Custom HUD support (optional)
 
 When the [Custom HUD](https://www.nexusmods.com/warhammer40kdarktide/mods/10) mod is installed, the meter integrates with it automatically - no configuration needed:
@@ -326,7 +329,7 @@ The summary inherits all of the above, plus:
 * *(Power Overflow)* Toughness wasted while **below** full counts as `Overflowed` but never as `Shared`: the talent only procs when the replenishment restored nothing at all, so a partial clamp is wasted without being shared. Expect `Shared` to be well under 25 % of `Generated`.
 * *(Born Leader)* When Duty and Honour raises maximum Toughness in the same instant Voice of Command restores it, that one bar-delta sample is skipped by the max-change guard, so `Replenished` misses that shout's restored portion.
 * `Shared` is what the talent *offers*. The server does not tell clients how much each ally actually received, and per-ally delivery is out of scope.
-* **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line and the scoreboard rows are the two supported ways to see the totals on that screen.
+* **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line, the rows in the game's Session Stats panel and the scoreboard rows are the supported ways to see the totals on that screen.
 * The chat line depends on DMF's own `echo` output mode. If you have set DMF to route echoes to the log only, the message will not appear in chat.
 * **A teammate's shared column is their estimate, not a measurement.** It carries every limitation above, produced independently on their machine. It is there for attribution and comparison, not precision.
 
