@@ -10,8 +10,14 @@
 -- Overflowed is what was asked for but clamped, without the support teammates give you
 -- (`ALLY_REASONS`), and Generated is their sum.
 --
+-- The pulse modules label what they count with the game's replenish reason (`record_mod`), so the
+-- breakdown sets each source's requested and overflowed amounts against the game's. Sources the
+-- game restores without a reason (`<nil>`) are labelled by the mod and summed onto `<nil>`
+-- (`MOD_TAG_REASONS`). Only the Zealot module labels its sources so far.
+--
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
--- Remove before release, together with its load line and its three calls there.
+-- Remove before release, together with its load line, its three calls there and the `record_mod`
+-- calls in `OverflowMeter_pulses_zealot.lua` and the HUD element.
 -- module: OverflowMeter_debug_truth
 -- alias: Truth
 -- author: LucLeto
@@ -37,11 +43,20 @@ local ALLY_REASONS = {
     pinning_dog_kills_buff_allies = true
 }
 
+--- Mod labels for sources the game restores without a reason, and the game reason they sum onto.
+-- `continuous_model` is the modelled at-full regeneration, for the Zealot the elite-kill window.
+local MOD_TAG_REASONS = {
+    blessing = "<nil>",
+    continuous_model = "<nil>"
+}
+
 local Truth = {}
 
---- Sums per reason (`calls`, `wanted`, `recovered`), the time to the next total line, and whether
--- this mission was reported already.
+--- The game's sums per reason (`calls`, `wanted`, `recovered`), the mod's per label (`events`,
+-- `wanted`, `overflowed`), the time to the next total line, and whether this mission was reported
+-- already.
 local reasons = {}
+local mod_sources = {}
 local timer = 0
 local reported = false
 
@@ -123,10 +138,55 @@ local function _totals_line(label)
     )
 end
 
+--- Adds one restore the mod counted.
+-- ?string: source label of the source, the game's replenish reason where there is one
+-- number: wanted wanted restore in Toughness points
+-- number: overflowed part of it counted as overflowed
+Truth.record_mod = function (source, wanted, overflowed)
+    local key = source or "<untagged>"
+    local entry = mod_sources[key]
+
+    if not entry then
+        entry = {
+            events = 0,
+            wanted = 0,
+            overflowed = 0
+        }
+        mod_sources[key] = entry
+    end
+
+    entry.events = entry.events + 1
+    entry.wanted = entry.wanted + wanted
+    entry.overflowed = entry.overflowed + overflowed
+end
+
+--- Returns the mod's sums for a game reason, over every label that maps onto it.
+-- string: reason game reason
+-- treturn: ?number events, nil when no label maps onto the reason
+-- treturn: number wanted
+-- treturn: number overflowed
+local function _mod_for_reason(reason)
+    local events, wanted, overflowed = nil, 0, 0
+
+    for key, entry in pairs(mod_sources) do
+        if (MOD_TAG_REASONS[key] or key) == reason then
+            events = (events or 0) + entry.events
+            wanted = wanted + entry.wanted
+            overflowed = overflowed + entry.overflowed
+        end
+    end
+
+    return events, wanted, overflowed
+end
+
 --- Forgets every sum, when a mission starts.
 Truth.reset = function ()
     for key in pairs(reasons) do
         reasons[key] = nil
+    end
+
+    for key in pairs(mod_sources) do
+        mod_sources[key] = nil
     end
 
     timer = 0
@@ -173,10 +233,27 @@ Truth.report = function ()
     for i = 1, #keys do
         local key = keys[i]
         local entry = reasons[key]
+        local mod_events, mod_wanted, mod_overflowed = _mod_for_reason(key)
+        local mod_part = mod_events and string_format("mod events=%d wanted=%.1f overflowed=%.1f", mod_events, mod_wanted, mod_overflowed) or "mod -"
 
-        mod:info("[OFM] truth reason=%s calls=%d wanted=%.1f recovered=%.1f overflowed=%.1f%s", key, entry.calls, entry.wanted, entry.recovered, entry.wanted - entry.recovered, ALLY_REASONS[key] and " (ally)" or "")
+        mod:info("[OFM] truth reason=%s calls=%d wanted=%.1f recovered=%.1f overflowed=%.1f%s | %s", key, entry.calls, entry.wanted, entry.recovered, entry.wanted - entry.recovered, ALLY_REASONS[key] and " (ally)" or "", mod_part)
     end
 
+    local tagged_overflowed = 0
+
+    for key, entry in pairs(mod_sources) do
+        local reason = MOD_TAG_REASONS[key]
+
+        tagged_overflowed = tagged_overflowed + entry.overflowed
+
+        if reason then
+            mod:info("[OFM] truth   %s part: mod source=%s events=%d wanted=%.1f overflowed=%.1f", reason, key, entry.events, entry.wanted, entry.overflowed)
+        elseif not reasons[key] then
+            mod:info("[OFM] truth mod-only source=%s events=%d wanted=%.1f overflowed=%.1f", key, entry.events, entry.wanted, entry.overflowed)
+        end
+    end
+
+    mod:info("[OFM] truth mod overflowed by label=%.1f, unlabelled=%.1f", tagged_overflowed, Stats.overflowed - tagged_overflowed)
     mod:info("%s", _totals_line("mission"))
 
     local generated, replenished, overflowed = _totals()

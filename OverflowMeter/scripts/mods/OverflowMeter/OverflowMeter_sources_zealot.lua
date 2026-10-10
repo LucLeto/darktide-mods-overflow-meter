@@ -37,10 +37,11 @@ local elite_kill_regen_duration = elite_kills_settings and elite_kills_settings.
 local HEAVY_KILL_BUFF_NAME = "zealot_toughness_on_heavy_kills"
 local ELITE_KILLS_BUFF_NAME = "zealot_elite_kills_empowers"
 
---- Talent proc buffs whose activation the server reports to the client (they have a cooldown).
--- The restored fraction is the template's `toughness_percentage`, scaled by the stat buffs.
+--- Talent proc buffs whose activation the server reports to the client (they have a cooldown),
+-- mapped to the replenish reason their restore uses. The restored fraction is the template's
+-- `toughness_percentage`, scaled by the stat buffs.
 local TALENT_TOUGHNESS_PROC_TEMPLATES = {
-    zealot_toughness_on_dodge = true
+    zealot_toughness_on_dodge = "zealot_dodge"
 }
 
 --- Replenish reasons of the Zealot buffs whose `start_func` or `update_func` also runs on the

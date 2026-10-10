@@ -36,6 +36,13 @@ local type = type
 local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local MELEE_ATTACK_STRENGTH_HEAVY = "heavy"
+
+--- Labels of the counted sources: the game's replenish reason where the source has one, which
+-- lets the TEMPORARY solo-play comparison set each source against the game's own figure.
+local SOURCE_MELEE_KILL = "melee_kill"
+local SOURCE_HEAVY_KILL = "zealot_heavy_kill"
+local SOURCE_CHASTISE = "lunging"
+local SOURCE_BLESSING = "blessing"
 --- Timer value for "never happened", so the first event is never de-duplicated.
 local NEVER = -math.huge
 
@@ -149,7 +156,8 @@ end
 
 --- Adds the part of a wanted restore that exceeds the missing Toughness to the excess queue.
 -- ?number: wanted wanted restore in Toughness points; ignored unless positive
-local function _accumulate_wanted(wanted)
+-- string: source label of the source
+local function _accumulate_wanted(wanted, source)
     if not wanted or wanted <= 0 then
         return
     end
@@ -166,13 +174,21 @@ local function _accumulate_wanted(wanted)
     if excess > 0 then
         Pulses.pending_excess = Pulses.pending_excess + excess
     end
+
+    -- TEMPORARY: per-source figures for the solo-play comparison.
+    local debug_truth = mod._debug_truth
+
+    if debug_truth then
+        debug_truth.record_mod(source, wanted, excess > 0 and excess or 0)
+    end
 end
 
 --- Records a restore given as a fraction of maximum Toughness.
 -- ?number: fraction restore fraction; ignored unless positive
 -- ?bool: apply_replenish_stat_buffs scale by `toughness_replenish_modifier` and
 -- `toughness_replenish_multiplier`, as the game does for restores that use stat buffs
-local function _add_pulse(fraction, apply_replenish_stat_buffs)
+-- string: source label of the source
+local function _add_pulse(fraction, apply_replenish_stat_buffs, source)
     if not fraction or fraction <= 0 then
         return
     end
@@ -194,7 +210,7 @@ local function _add_pulse(fraction, apply_replenish_stat_buffs)
         end
     end
 
-    _accumulate_wanted(wanted)
+    _accumulate_wanted(wanted, source)
 end
 
 --- Records the base melee-kill restore, scaled the way the game's toughness template does.
@@ -216,7 +232,7 @@ local function _add_melee_kill_pulse()
     end
 
     if fraction > 0 then
-        _accumulate_wanted(fraction * toughness_extension:max_toughness())
+        _accumulate_wanted(fraction * toughness_extension:max_toughness(), SOURCE_MELEE_KILL)
     end
 end
 
@@ -293,10 +309,12 @@ Pulses.on_proc_active = function(buff_extension, index)
 
     local template_name = buff_instance:template_name()
 
-    if Sources.talent_toughness_proc_templates[template_name] then
+    local talent_reason = Sources.talent_toughness_proc_templates[template_name]
+
+    if talent_reason then
         local template = buff_instance.template and buff_instance:template()
 
-        _add_pulse(template and template.toughness_percentage, true)
+        _add_pulse(template and template.toughness_percentage, true, talent_reason)
 
         return
     end
@@ -324,7 +342,7 @@ Pulses.on_proc_active = function(buff_extension, index)
         fixed_percentage = fixed_percentage * math_min(fire_step, Sources.max_continuous_fire_steps)
     end
 
-    _add_pulse(fixed_percentage, false)
+    _add_pulse(fixed_percentage, false, SOURCE_BLESSING)
 end
 
 --- Records what one of the Zealot's own kills restores.
@@ -346,7 +364,7 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 
     if Pulses.has_heavy_kill_talent and damage_profile and damage_profile.melee_attack_strength == MELEE_ATTACK_STRENGTH_HEAVY then
-        _add_pulse(Sources.heavy_kill_fraction, true)
+        _add_pulse(Sources.heavy_kill_fraction, true, SOURCE_HEAVY_KILL)
     end
 
     if Pulses.has_elite_kill_talent and attacked_unit then
@@ -383,7 +401,7 @@ Pulses.on_replenish_percentage = function(unit, fixed_percentage, ignore_stat_bu
         Pulses.last_stealth_t = now
     end
 
-    _add_pulse(fixed_percentage, not ignore_stat_buffs)
+    _add_pulse(fixed_percentage, not ignore_stat_buffs, reason)
 end
 
 -- ----------------------------------------------------------------------------
@@ -417,7 +435,7 @@ mod:hook_safe("PlayerCharacterStateLunging", "on_enter", function(self, unit, dt
 
     Pulses.last_lunge_t = now
 
-    _add_pulse(restore_toughness, false)
+    _add_pulse(restore_toughness, false, SOURCE_CHASTISE)
 end)
 
 return Pulses

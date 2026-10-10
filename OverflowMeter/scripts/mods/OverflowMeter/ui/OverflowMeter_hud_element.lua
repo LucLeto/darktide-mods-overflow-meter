@@ -994,6 +994,11 @@ HudElementOverflowMeter._sample_bar_gain = function (self)
         end
     end
 
+    -- TEMPORARY: the modelled at-full regeneration for the solo-play comparison.
+    if continuous_overflow > 0 and mod._debug_truth then
+        mod._debug_truth.record_mod("continuous_model", continuous_overflow, continuous_overflow)
+    end
+
     local burst_share = pulses.consume_burst()
 
     if sharing then
