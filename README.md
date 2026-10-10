@@ -1,6 +1,8 @@
 # darktide-mods-overflow-meter
 Overflow Meter adds a multiplayer-focused HUD for the invisible Toughness-sharing talents: the **Skitarii** *Power Overflow* and the **Veteran** *Born Leader*. Both are processed by the server and share none of their values with multiplayer clients, so the mod estimates when and how effectively you share Toughness with nearby teammates, showing Coherency, team demand, and approximate Toughness offered in real time. The meter detects your class automatically and adapts its labels and estimation model to whichever talent you have equipped.
 
+Its [mission summary](#mission-summary) - how much Toughness you generated, how much of it replenished you and how much overflowed against your cap - does not need a sharing talent: it is tracked for Skitarii and Veterans with or without their sharing talent, and for **Zealots**.
+
 ## Display
 
 The meter has two styles, selectable in the settings:
@@ -29,6 +31,8 @@ The widget is active while playing a Skitarii with Power Overflow **or** a Veter
 
 Born Leader has no arming condition, so it never shows the **Inactive** state; that state and its `Show inactive state` setting apply to Power Overflow only.
 
+Without one of the two talents the meter stays hidden, because there is nothing to share. Your mission statistics keep being tracked in the background (see [Mission summary](#mission-summary)).
+
 With `Show output tier labels` enabled (off by default), the sharing text also carries a **Low / Mid / High** badge comparing the current estimated rate to your equipped build's sustained ceiling.
 
 All displayed rates are marked with `~` because they are estimates.
@@ -48,6 +52,12 @@ Binding it to `TAB` pairs it with the game's own Tactical Overlay, so both appea
 | Efficiency | Share efficiency: of all the Toughness the talent *could* have offered, the percentage that actually reached an ally. Replenishing with nobody in Coherency drives it down. Ally count deliberately does not matter, because both talents give every ally the full share rather than splitting it - one ally in Coherency is 100 %, none is 0 %. |
 
 **Only `Replenished` is observed**, read from your own replicated Toughness bar. Everything else is inferred and is therefore prefixed with `~`, the same estimate marker the live meter uses.
+
+**Builds without a sharing talent.** Generated, Replenished and Overflowed are tracked for every supported class: Skitarii and Veterans with or without their sharing talent, and Zealots ([sources](#zealot-replenishment-sources)). Other classes are not tracked yet. Shared and Efficiency only apply with Power Overflow or Born Leader, so for every other build they are shown as *not applicable* rather than as 0:
+
+* The summary panel and the Session Stats rows show `-`, and the chat line leaves both values out.
+* Scoreboard shows `-` and Another Scoreboard its own `—`.
+* VT2 Scoreboard, Scores and Power_DI only accept numbers, so they show 0.
 
 The totals reset when you enter a new mission and keep accumulating whether or not the panel is shown, so you can check them at any point - including after going down, when the meter itself has already stopped.
 
@@ -91,7 +101,8 @@ All five metrics are registered as rows through its plugin API, in Scoreboard's 
 
 Two behaviours worth knowing:
 
-* **All rows rank "higher is better."** Teammates without a sharing talent always score zero, so ranking *Overflowed* as "lower is better" would grey out the only player the row actually applies to.
+* **All rows rank "higher is better."** Teammates without this mod always score zero, so ranking *Overflowed* as "lower is better" would grey out the players the row actually applies to.
+* **Shared and Efficiency show `-` for a player without a sharing talent.** The cell keeps a score of 0 underneath, so Scoreboard's ranking and score rows keep working; a Scoreboard release without this per-cell text shows the 0 instead.
 * **Efficiency is written differently from the other rows.** Every numeric row type in Scoreboard accumulates, which would make a percentage ratchet upwards instead of showing its current value. Its cell is therefore replaced on each update rather than pushed through `update_stat` - the same approach Ovenproof's plugin uses for its Weakspot and Critical Rate rows. It displays as a plain number, with the unit in the row label.
 * **Placement adapts to [Ovenproof's Scoreboard Plugin](https://www.nexusmods.com/warhammer40kdarktide/mods/514).** That plugin rebuilds the board into a single group of its own, which would otherwise leave these rows stranded in an empty *Defence* group above everything else. When it is detected, the rows are moved into its list directly after *Total [Times Killed | Players Rescued]* and adopt its group. Without it they stay in Scoreboard's *Defence* group and feed its auto-generated **Defense Score** as normal.
 
@@ -167,6 +178,7 @@ What this does and does not do:
 * **Only players who queued together as a party are reached.** Presence replicates across the Immaterium *party*, which is not the same set as the players in your mission. In quickplay with strangers there is nobody to exchange with, and the board looks exactly as it does without this feature.
 * **You do not both need the same scoreboard mod.** What travels between clients is the mission summary itself, not any particular mod's rows. One of you can be on Scoreboard and the other on Scores, VT2 Scoreboard, Power_DI, Another Scoreboard, or none of them at all.
 * **Only mission statistics are published**, in a payload of about 75 bytes. Presence is readable by any account holding a member's account id, so nothing else is ever put on it. The mod never publishes a value over 250 bytes, because the backend rejects any presence value above 256 and responds by dropping the whole presence stream.
+* **Builds without a sharing talent publish too.** Their payload (version 2) carries Generated, Replenished and Overflowed plus a flag saying Shared and Efficiency do not apply, so a teammate's scoreboard shows those two as missing. Teammates still on an older version of the mod read them as 0, without errors.
 
 Turning `Share mission summary` off clears the published value; you will still read and display the totals of teammates who share theirs.
 
@@ -286,6 +298,32 @@ At full Toughness the bar is static, so the meter switches to modelling the sour
 
 Because these two paths are mutually exclusive - the bar delta below full, the model at full - nothing is counted twice. The remaining at-full undercount is **Field Improvisation** (1 %/s near your deployed Medi-Pack), which has no reliable client-side signal for the proximity check. Note also that **Duty and Honour**'s +75 bonus Toughness is *not* counted: it raises maximum Toughness rather than replenishing it, so Born Leader does not share it.
 
+## Zealot replenishment sources
+
+The Zealot has no Toughness-sharing talent, so there is no live meter; only the mission statistics (Generated, Replenished, Overflowed) are tracked. Everything that replenishes you while you are **below** full is read from your own Toughness bar, whatever its source. What the bar cannot show - Toughness clamped at your cap or replenished while already full - is reconstructed from client-side signals. All amounts are % of maximum Toughness and scale with Toughness-replenish stat buffs (Martyrdom, curios) unless noted. Values are taken from the game's own settings.
+
+| Source | Mechanics | How the overflow is tracked |
+| --- | --- | --- |
+| Melee Kill | 5 % per melee kill, +75 % from the Zealot's base melee-kill talent. | Local attack reports. |
+| Chastise the Wicked | The dash replenishes 50 % when it starts; ignores stat buffs. | Your own lunging state. |
+| Heavy-attack kills (`zealot_toughness_on_heavy_kills`) | 10 % per kill with a heavy attack. | Local attack reports. |
+| Dodge restore (`zealot_toughness_on_dodge`) | 15 % per successful dodge (0.5 s cooldown). | The proc activation the server reports to you. |
+| Elite-kill regeneration (`zealot_elite_kills_empowers`) | 15 % over 5 s (3 %/s) after an Elite kill, refreshed by the next one. | Modelled from the kill; paused while disabled. |
+| Shroudfield restore | 50 % when Shroudfield starts. | The talent's own client-side replenish request. |
+| In-melee regeneration (`zealot_toughness_in_melee`) | 2.5 % per second plus 1 % per additional enemy within 5 m, up to 7.5 %/s. | The talent's own client-side replenish request. |
+| Momentum (Inexorable Judgement) | 0.5 %/s per Momentum stack while its bonus is active. | The talent's own client-side replenish request. |
+| Fanatic Rage at maximum | 2 %/s while at maximum Fanatic Rage stacks. | The talent's own client-side replenish request. |
+| Weapon blessings | Fixed-percentage blessings, including the Flamer's continuous-fire restore; ignore stat buffs. | The proc activation the server reports to you. |
+
+**How the client-side replenish requests work.** Several Zealot buffs run their update functions on your own client too, and ask the game to replenish your Toughness there. On a client that request does nothing, because the server owns your Toughness, but the mod can see it. That makes it an exact feed for these sources at full Toughness. Only a fixed list of reasons for your own character is counted, so nothing is double-counted against the other paths.
+
+Not counted while at full Toughness (an undercount of `Overflowed`, and therefore of `Generated`):
+
+* Bolstering Prayer's channel regeneration (server-only ticks).
+* The while-shooting regeneration (server-only).
+* Fanatic Rage's 50 % on reaching maximum stacks (a server-only proc; it is only seen when you host, for example in solo play).
+* The self-portion of melee kills that restore Toughness to the ally the enemy was targeting (a server-only proc).
+
 ## Settings
 
 `Power Overflow Meter` group: meter style (Gauge / Text / Both / None), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To hide the live meter while keeping all statistics, set `Meter style` to `None`: tracking, the mission summary, the end-of-mission chat line, and the scoreboard rows keep working. Disabling the mod through the standard mod toggle stops tracking as well.
@@ -319,6 +357,7 @@ Power Overflow and Born Leader are processed by the server, and multiplayer clie
 * Kill- and hit-based pulses are inferred from local attack reports and can differ slightly from the server's proc order (for example an explosion hit that kills its target).
 * *(Born Leader)* The continuous regeneration counted while at full Toughness is modelled from talent selection and timers rather than read from the server's buffs, so its active windows are approximations. In particular, Catch a Breath's cooldown is restarted from melee hits that land on you; **blocking** an attack also restarts it in game but is not observable client-side, so the meter can credit a little regeneration that the server did not grant.
 * *(Born Leader)* Field Improvisation's 1 %/s near a deployed Medi-Pack is not counted while at full Toughness (no reliable client-side proximity signal), and Duty and Honour's +75 bonus Toughness is excluded by design because it raises maximum Toughness rather than replenishing it.
+* *(Zealot)* The at-full gaps listed under [Zealot replenishment sources](#zealot-replenishment-sources) are not counted. Like the other classes, replenishment the server blocks (while knocked down, or standing in fire or toxic gas) can still be credited from the client-side signals.
 
 ### Mission summary
 
@@ -329,6 +368,8 @@ The summary inherits all of the above, plus:
 * *(Power Overflow)* Toughness wasted while **below** full counts as `Overflowed` but never as `Shared`: the talent only procs when the replenishment restored nothing at all, so a partial clamp is wasted without being shared. Expect `Shared` to be well under 25 % of `Generated`.
 * *(Born Leader)* When Duty and Honour raises maximum Toughness in the same instant Voice of Command restores it, that one bar-delta sample is skipped by the max-change guard, so `Replenished` misses that shout's restored portion.
 * `Shared` is what the talent *offers*. The server does not tell clients how much each ally actually received, and per-ally delivery is out of scope.
+* **Only your own totals are computed.** A teammate's values come only from their own Overflow Meter, through the shared summary; nothing is inferred for players without the mod, and Psykers, Ogryns, Arbites and Hive Scum are not tracked yet.
+* **`Generated` is meant to be your own build's generation, but teammates' support leaks into it below full.** `Replenished` is read from your Toughness bar, which cannot tell where Toughness came from. So while you are missing Toughness, it also includes what teammates give you: coherency regeneration, an Arbites' drone, a Psyker's dome. At full Toughness such ally support is deliberately not counted as `Overflowed`.
 * **The panel itself is in-mission only.** The game destroys the whole HUD (and `Managers.state`) during mission teardown, before the end-of-round screen opens, so no HUD element can render there. The chat line, the rows in the game's Session Stats panel and the scoreboard rows are the supported ways to see the totals on that screen.
 * The chat line depends on DMF's own `echo` output mode. If you have set DMF to route echoes to the log only, the message will not appear in chat.
 * **A teammate's shared column is their estimate, not a measurement.** It carries every limitation above, produced independently on their machine. It is there for attribution and comparison, not precision.

@@ -6,6 +6,11 @@
 -- the rows are moved directly above its `blank_3` spacer row and into that row's group, so they
 -- sit with the plugin's defense rows.
 --
+-- Shared and the efficiency do not apply to a build without a sharing talent. Their cells then
+-- get the Scoreboard's `text_data`, which it shows instead of the formatted score, set to `-`,
+-- with a score of 0 so its ranking and score rows keep working (a Scoreboard without `text_data`
+-- simply shows the 0). `text` carries the `-` into its history.
+--
 -- Explicit module loaded by `OverflowMeter.lua`; it registers itself with the snapshot. It stays
 -- active and does nothing while the Scoreboard is missing or disabled or every row is turned off.
 -- module: OverflowMeter_scoreboard
@@ -25,6 +30,9 @@ local OVENPROOF_ANCHOR_ROW = "blank_3"
 
 local METRICS = Snapshot.METRICS
 local METRIC_COUNT = Snapshot.METRIC_COUNT
+
+--- Text of a cell whose metric does not apply to the player's build.
+local UNAVAILABLE_TEXT = "-"
 
 --- Per-metric row names, entry fields, and whether the value replaces the row data.
 local SCOREBOARD_ROW_NAMES = {}
@@ -46,8 +54,10 @@ local Adapter = {
     active = true
 }
 
---- The Scoreboard mod while it can receive values, set by `prepare`.
+--- The Scoreboard mod while it can receive values, set by `prepare`, and whether any cell was
+-- marked as not applicable since the last reset (only then can a mark need removing).
 local target = nil
+local any_marked = false
 
 --- Writes a value straight into a row's data, replacing it instead of accumulating it.
 -- tab: scoreboard Scoreboard mod
@@ -78,6 +88,56 @@ local function _replace_scoreboard_stat(scoreboard, row_name, account_id, value)
     entry.value = value
     entry.score = value
     entry.text = nil
+end
+
+--- Marks a row's cell as not applicable: `-` as its text, 0 as its value and score.
+-- tab: scoreboard Scoreboard mod
+-- string: row_name row name
+-- string: account_id player's account id
+local function _mark_scoreboard_unavailable(scoreboard, row_name, account_id)
+    local row = scoreboard.get_scoreboard_row and scoreboard:get_scoreboard_row(row_name)
+
+    if not row then
+        return
+    end
+
+    local row_data = row.data
+
+    if not row_data then
+        row_data = {}
+        row.data = row_data
+    end
+
+    local entry = row_data[account_id]
+
+    if not entry then
+        entry = {}
+        row_data[account_id] = entry
+    end
+
+    entry.value = 0
+    entry.score = 0
+    entry.text = UNAVAILABLE_TEXT
+    entry.text_data = UNAVAILABLE_TEXT
+
+    any_marked = true
+end
+
+--- Removes the not-applicable mark from a row's cell, so its value shows again.
+-- The Scoreboard never clears `text_data` itself. The cell keeps the value 0, so the next
+-- accumulated push adds the full total.
+-- tab: scoreboard Scoreboard mod
+-- string: row_name row name
+-- string: account_id player's account id
+local function _clear_scoreboard_unavailable(scoreboard, row_name, account_id)
+    local row = scoreboard.get_scoreboard_row and scoreboard:get_scoreboard_row(row_name)
+    local row_data = row and row.data
+    local entry = row_data and row_data[account_id]
+
+    if entry and entry.text_data == UNAVAILABLE_TEXT then
+        entry.text = nil
+        entry.text_data = nil
+    end
 end
 
 --- Returns the index of a row by name.
@@ -175,6 +235,8 @@ Adapter.prepare = function ()
 end
 
 --- Writes an entry's enabled metrics into the Scoreboard rows.
+-- A metric that does not apply to the entry's build marks its cell instead; a share metric that
+-- does apply first removes a mark left from before.
 -- tab: entry snapshot entry
 Adapter.publish = function (entry)
     local scoreboard = target
@@ -190,20 +252,29 @@ Adapter.publish = function (entry)
         local metric = METRICS[i]
 
         if settings[metric.setting] then
-            local value = entry[FIELDS[i]]
-
-            if REPLACES_VALUE[i] then
-                _replace_scoreboard_stat(scoreboard, metric.row, account_id, value)
+            if not Snapshot.is_available(entry, metric) then
+                _mark_scoreboard_unavailable(scoreboard, metric.row, account_id)
             else
-                scoreboard:update_stat(metric.row, account_id, value)
+                local value = entry[FIELDS[i]]
+
+                if any_marked and metric.share then
+                    _clear_scoreboard_unavailable(scoreboard, metric.row, account_id)
+                end
+
+                if REPLACES_VALUE[i] then
+                    _replace_scoreboard_stat(scoreboard, metric.row, account_id, value)
+                else
+                    scoreboard:update_stat(metric.row, account_id, value)
+                end
             end
         end
     end
 end
 
---- Forgets the Scoreboard mod until the next publish.
+--- Forgets the Scoreboard mod until the next publish, and the marks of the last mission.
 Adapter.reset = function ()
     target = nil
+    any_marked = false
 end
 
 Snapshot.register_adapter(Adapter)

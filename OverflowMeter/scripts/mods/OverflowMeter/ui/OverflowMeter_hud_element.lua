@@ -1,11 +1,13 @@
---- The HUD element that samples Toughness sharing and draws the meter and the summary panel.
--- Once a second it checks whether the local player is in a mission as a supported class with its
--- sharing talent (a Skitarius with Power Overflow or a Veteran with Born Leader) and wires up that
--- archetype's sources and pulse module. Four times a second it samples: it measures what the
+--- The HUD element that samples Toughness and draws the meter and the summary panel.
+-- Once a second it checks whether the local player is in a mission as a tracked archetype
+-- (Skitarii, Veteran or Zealot) and wires up that archetype's sources and pulse module; sharing is
+-- tracked as well when the build has its archetype's sharing talent (a Skitarius with Power
+-- Overflow or a Veteran with Born Leader). Four times a second it samples: it measures what the
 -- replicated Toughness bar gained, sums the active continuous sources (Skitarii) or the modelled
--- at-full regeneration (Veteran), drains the pulse queues, counts the allies in Coherency and those
--- missing Toughness, feeds the estimator and adds the sample to the mission statistics. The meter
--- (gauge, readout, state and context lines) is only redrawn when a displayed value changes.
+-- at-full regeneration (every other archetype), drains the pulse queues and adds the sample to
+-- the mission statistics. With a sharing talent it also counts the allies in Coherency and those
+-- missing Toughness and feeds the estimator; without one the meter stays hidden. The meter (gauge,
+-- readout, state and context lines) is only redrawn when a displayed value changes.
 --
 -- The mission summary panel is a second widget of the same element, shown while the hold key is
 -- down or permanently. The element also pushes the local totals to the scoreboard snapshot once a
@@ -47,10 +49,11 @@ local GUARD_INTERVAL = 1
 local SAMPLE_INTERVAL = 0.25
 local FULL_TOUGHNESS_EPSILON = 0.999
 local MISSING_TOUGHNESS_EPSILON = 0.5
-local ARCHETYPE_VETERAN = "veteran"
+local ARCHETYPE_CRYPTIC = "cryptic"
 
---- Supported archetypes: the sharing talent's buff template, its id in the profile's talents, the
--- meter title and the burst flash text.
+--- Archetypes with a sharing talent: the talent's buff template, its id in the profile's talents,
+-- the meter title and the burst flash text. Tracked archetypes without an entry (and builds without
+-- the talent) get mission statistics but no meter.
 local ARCHETYPES = {
     cryptic = {
         talent_buff = "cryptic_shared_toughness",
@@ -189,8 +192,9 @@ for i = 1, SUM_ROW_COUNT do
     SUM_VALUE_IDS[i] = "sum_value_" .. i
 end
 
---- Prefix that marks an estimated value.
+--- Prefix that marks an estimated value, and the text of a value that does not apply to the build.
 local ESTIMATE_PREFIX = "~"
+local UNAVAILABLE_TEXT = "-"
 
 --- Linear interpolation between two numbers.
 local function _lerp(a, b, t)
@@ -421,6 +425,7 @@ HudElementOverflowMeter.init = function (self, parent, draw_layer, start_scale)
     self._ctx = { buffs_by_name = {} }
     self._loc = {}
     self._supported = false
+    self._sharing = false
     self._archetype = nil
     self._sources = nil
     self._pulses = nil
@@ -472,7 +477,7 @@ end
 -- Reapplies the display settings after a change and resets after a reset request. Once a second
 -- it follows Custom HUD changes, rechecks support and pushes the scoreboard snapshot. The summary
 -- panel refreshes every frame when its data changed; while supported and the player unit is
--- alive, sharing is sampled and the meter refreshed every `SAMPLE_INTERVAL`.
+-- alive, Toughness is sampled and the meter refreshed every `SAMPLE_INTERVAL`.
 -- number: dt frame delta time
 -- number: t time
 -- tab: ui_renderer UI renderer
@@ -604,12 +609,13 @@ HudElementOverflowMeter._custom_hud_layout = function (self)
     return self:_custom_hud_node(CUSTOM_HUD_NODE_KEY, NODE_W)
 end
 
---- Returns whether the meter can run now, and wires the archetype's modules when it can.
--- Needs a mission (not the hub), a living local player unit of a supported archetype with its
--- sharing talent, and the buff and toughness extensions. The talent is read from the talent
--- extension, falling back to the profile's talents, whose entries are numbers before 1.13 and
--- `{ tier, ... }` tables since. On success it caches the extensions in the sample context and
--- enables the archetype's pulse module.
+--- Returns whether tracking can run now, and wires the archetype's modules when it can.
+-- Needs a mission (not the hub), a living local player unit of a tracked archetype (one with a
+-- source model and a pulse module) and the buff and toughness extensions. Sharing is tracked as
+-- well when the archetype has a sharing talent and the build has it. The talent is read from the
+-- talent extension, falling back to the profile's talents, whose entries are numbers before 1.13
+-- and `{ tier, ... }` tables since. On success it caches the extensions in the sample context and
+-- enables the archetype's pulse module as the one the shared hooks dispatch to.
 -- tab: settings cached settings
 -- treturn: bool
 HudElementOverflowMeter._check_supported = function (self, settings)
@@ -646,35 +652,33 @@ HudElementOverflowMeter._check_supported = function (self, settings)
     end
 
     local archetype = player.archetype_name and player:archetype_name()
-    local archetype_config = archetype and ARCHETYPES[archetype]
 
-    if not archetype_config then
+    if not archetype or not mod._sources_by_archetype[archetype] or not mod._pulses_by_archetype[archetype] then
         return false
     end
 
+    local archetype_config = ARCHETYPES[archetype]
     local talent_extension = ScriptUnit.has_extension(player_unit, "talent_system")
     local has_talent = false
 
-    if talent_extension and talent_extension.buff_template_tier then
-        local tier = talent_extension:buff_template_tier(archetype_config.talent_buff)
+    if archetype_config then
+        if talent_extension and talent_extension.buff_template_tier then
+            local tier = talent_extension:buff_template_tier(archetype_config.talent_buff)
 
-        has_talent = tier ~= nil and tier ~= 0
-    end
-
-    if not has_talent and player.profile then
-        local profile = player:profile()
-        local talents = profile and profile.talents
-        local points = talents and talents[archetype_config.talent_id]
-
-        if type(points) == "table" then
-            points = points.tier
+            has_talent = tier ~= nil and tier ~= 0
         end
 
-        has_talent = points ~= nil and points ~= 0
-    end
+        if not has_talent and player.profile then
+            local profile = player:profile()
+            local talents = profile and profile.talents
+            local points = talents and talents[archetype_config.talent_id]
 
-    if not has_talent then
-        return false
+            if type(points) == "table" then
+                points = points.tier
+            end
+
+            has_talent = points ~= nil and points ~= 0
+        end
     end
 
     local buff_extension = ScriptUnit.has_extension(player_unit, "buff_system")
@@ -684,7 +688,7 @@ HudElementOverflowMeter._check_supported = function (self, settings)
         return false
     end
 
-    self:_set_archetype(archetype)
+    self:_set_archetype(archetype, has_talent)
 
     local ctx = self._ctx
 
@@ -697,20 +701,26 @@ HudElementOverflowMeter._check_supported = function (self, settings)
 
     self._pulses.set_context(player_unit, buff_extension, toughness_extension, talent_extension)
 
+    mod._active_pulses = self._pulses
+
     return true
 end
 
 --- Switches to an archetype's sources, pulses, estimator mode, statistics context and texts.
--- Does nothing when the archetype is unchanged.
+-- Does nothing when neither the archetype nor whether its sharing talent is equipped changed.
+-- Without the talent the statistics get a share fraction of 0, so they leave Shared and the
+-- efficiency out.
 -- string: archetype archetype name
-HudElementOverflowMeter._set_archetype = function (self, archetype)
-    if self._archetype == archetype then
+-- bool: sharing whether the build has the archetype's sharing talent
+HudElementOverflowMeter._set_archetype = function (self, archetype, sharing)
+    if self._archetype == archetype and self._sharing == sharing then
         return
     end
 
     mod._disable_all_pulses()
 
     self._archetype = archetype
+    self._sharing = sharing
     self._sources = mod._sources_by_archetype[archetype]
     self._pulses = mod._pulses_by_archetype[archetype]
     self._last_toughness_damage = nil
@@ -720,7 +730,7 @@ HudElementOverflowMeter._set_archetype = function (self, archetype)
 
     self._estimator:set_mode(sources.continuous_when_full, sources.has_inactive_state)
 
-    Stats.set_context(archetype, sources.share_fraction)
+    Stats.set_context(archetype, sharing and sources.share_fraction or 0)
 
     self:_refresh_localization()
     self:_clear_render_cache()
@@ -808,15 +818,16 @@ HudElementOverflowMeter._update_burst_flash = function (self, burst_share, allie
     end
 end
 
---- Takes one Power Overflow sample, or hands over to `_sample_veteran` for a Veteran.
+--- Takes one Skitarii sample, or hands over to `_sample_bar_gain` for every other archetype.
 -- Power Overflow shares 25 % of what is replenished at full. The continuous rate is the sum of the
 -- active adapters, scaled by the replenish stat buffs; it counts only at full. Pulses that landed
 -- at full add a one-sample spike and a Voltaic Overcharge restore a burst flash. The statistics
 -- get the bar gain, the overflow (pulse overflow plus the continuous amount at full) and the
--- shareable amount.
+-- shareable amount. Without Power Overflow the allies, the estimator and the burst flash are
+-- skipped and nothing is shareable.
 HudElementOverflowMeter._sample = function (self)
-    if self._archetype == ARCHETYPE_VETERAN then
-        self:_sample_veteran()
+    if self._archetype ~= ARCHETYPE_CRYPTIC then
+        self:_sample_bar_gain()
 
         return
     end
@@ -868,7 +879,13 @@ HudElementOverflowMeter._sample = function (self)
 
     local share_per_ally_per_second = total_rate > 0 and total_rate * max_toughness * replenish_multiplier * sources.share_fraction or 0
 
-    local allies, allies_missing = self:_count_allies()
+    local sharing = self._sharing
+    local allies, allies_missing = 0, 0
+
+    if sharing then
+        allies, allies_missing = self:_count_allies()
+    end
+
     local ally_multiplier
 
     if self._rate_mode_total then
@@ -886,11 +903,13 @@ HudElementOverflowMeter._sample = function (self)
 
     local pending_burst_fraction = pulses.consume_burst_fraction()
 
-    self:_update_burst_flash(pending_burst_fraction * max_toughness * sources.share_fraction, allies, ally_multiplier)
+    if sharing then
+        self:_update_burst_flash(pending_burst_fraction * max_toughness * sources.share_fraction, allies, ally_multiplier)
 
-    local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * sources.share_fraction * ally_multiplier
+        local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * sources.share_fraction * ally_multiplier
 
-    self._estimator:sample(is_full, total_rate > 0, share_per_ally_per_second * ally_multiplier, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+        self._estimator:sample(is_full, total_rate > 0, share_per_ally_per_second * ally_multiplier, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+    end
 
     local stats_overflow = pulses.consume_overflow()
     local stats_shareable = (pending_pulse_fraction + pending_burst_fraction) * max_toughness
@@ -902,15 +921,17 @@ HudElementOverflowMeter._sample = function (self)
         stats_shareable = stats_shareable + continuous_amount
     end
 
-    Stats.add_event(bar_gain, stats_overflow, stats_shareable, allies)
+    Stats.add_event(bar_gain, stats_overflow, sharing and stats_shareable or 0, allies)
 end
 
---- Takes one Born Leader sample.
+--- Takes one bar-gain sample: Born Leader's model, which every archetype but Skitarii uses.
 -- Born Leader shares 20 % of every replenish. Below full the bar gain is the continuous rate,
 -- which already covers every source; at full the modelled regeneration takes its place, scaled
 -- by the replenish stat buffs. Pulses add their clamped excess, and Voice of Command or
--- Infiltrate a burst flash. Everything generated (bar gain plus overflow) is shareable.
-HudElementOverflowMeter._sample_veteran = function (self)
+-- Infiltrate a burst flash. Everything generated (bar gain plus overflow) is shareable. Without
+-- a sharing talent the allies, the estimator and the burst flash are skipped and nothing is
+-- shareable, which leaves the generated, replenished and overflowed totals.
+HudElementOverflowMeter._sample_bar_gain = function (self)
     local ctx = self._ctx
     local sources = self._sources
     local pulses = self._pulses
@@ -922,7 +943,13 @@ HudElementOverflowMeter._sample_veteran = function (self)
     local share_fraction = sources.share_fraction
     local bar_gain = self:_consume_bar_gain(toughness_damage, max_toughness)
 
-    local allies, allies_missing = self:_count_allies()
+    local sharing = self._sharing
+    local allies, allies_missing = 0, 0
+
+    if sharing then
+        allies, allies_missing = self:_count_allies()
+    end
+
     local ally_multiplier
 
     if self._rate_mode_total then
@@ -967,15 +994,19 @@ HudElementOverflowMeter._sample_veteran = function (self)
         end
     end
 
-    self:_update_burst_flash(pulses.consume_burst(), allies, ally_multiplier)
+    local burst_share = pulses.consume_burst()
 
-    local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * share_fraction * ally_multiplier
+    if sharing then
+        self:_update_burst_flash(burst_share, allies, ally_multiplier)
 
-    self._estimator:sample(is_full, bar_gain > 0, continuous_offered_per_second, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+        local nominal_ceiling = sources.available_max_fraction(ctx) * max_toughness * share_fraction * ally_multiplier
+
+        self._estimator:sample(is_full, bar_gain > 0, continuous_offered_per_second, pulse_offered_per_second, nominal_ceiling, allies, allies_missing)
+    end
 
     local stats_overflow = pending_excess + continuous_overflow + pulses.consume_burst_overflow()
 
-    Stats.add_event(bar_gain, stats_overflow, bar_gain + stats_overflow, allies)
+    Stats.add_event(bar_gain, stats_overflow, sharing and bar_gain + stats_overflow or 0, allies)
 end
 
 -- ----------------------------------------------------------------------------
@@ -997,14 +1028,15 @@ HudElementOverflowMeter._display_state = function (self, settings)
 end
 
 --- Shows or hides the meter and refreshes the gauge and the texts after a sample.
--- The meter is hidden for the `None` style, and in the Inactive state unless that is shown.
+-- The meter is hidden for the `None` style, for a build without a sharing talent, and in the
+-- Inactive state unless that is shown.
 -- tab: settings cached settings
 HudElementOverflowMeter._refresh_display = function (self, settings)
     local estimator = self._estimator
     local widget = self._widgets_by_name.meter
     local content = widget.content
 
-    if not self._show_meter or (estimator.state == STATE_INACTIVE and not settings.show_inactive_state) then
+    if not self._show_meter or not self._sharing or (estimator.state == STATE_INACTIVE and not settings.show_inactive_state) then
         if content.visible then
             content.visible = false
             widget.dirty = true
@@ -1218,7 +1250,8 @@ HudElementOverflowMeter._set_summary_value = function (self, index, text)
 end
 
 --- Shows the summary panel while the hold key is down or it is always shown, and while there is
--- something to show; rewrites its values when the statistics changed.
+-- something to show; rewrites its values when the statistics changed. Shared and the efficiency
+-- read `-` for a build without a sharing talent.
 -- tab: settings cached settings
 HudElementOverflowMeter._refresh_summary = function (self, settings)
     local widget = self._widgets_by_name.summary
@@ -1249,13 +1282,19 @@ HudElementOverflowMeter._refresh_summary = function (self, settings)
         widget.content.visible = true
     end
 
-    local shared = self._rate_mode_total and Stats.shared_total or Stats.shared
-
     dirty = self:_set_summary_value(1, ESTIMATE_PREFIX .. string_format("%d", math_floor(Stats.generated + 0.5))) or dirty
     dirty = self:_set_summary_value(2, string_format("%d", math_floor(Stats.replenished + 0.5))) or dirty
     dirty = self:_set_summary_value(3, ESTIMATE_PREFIX .. string_format("%d", math_floor(Stats.overflowed + 0.5))) or dirty
-    dirty = self:_set_summary_value(4, ESTIMATE_PREFIX .. string_format("%d", math_floor(shared + 0.5))) or dirty
-    dirty = self:_set_summary_value(5, ESTIMATE_PREFIX .. string_format("%d%%", math_floor(Stats.efficiency() * 100 + 0.5))) or dirty
+
+    if Stats.has_share_metrics then
+        local shared = self._rate_mode_total and Stats.shared_total or Stats.shared
+
+        dirty = self:_set_summary_value(4, ESTIMATE_PREFIX .. string_format("%d", math_floor(shared + 0.5))) or dirty
+        dirty = self:_set_summary_value(5, ESTIMATE_PREFIX .. string_format("%d%%", math_floor(Stats.efficiency() * 100 + 0.5))) or dirty
+    else
+        dirty = self:_set_summary_value(4, UNAVAILABLE_TEXT) or dirty
+        dirty = self:_set_summary_value(5, UNAVAILABLE_TEXT) or dirty
+    end
 
     if dirty then
         widget.dirty = true

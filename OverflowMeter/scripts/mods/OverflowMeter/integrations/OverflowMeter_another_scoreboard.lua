@@ -2,7 +2,9 @@
 -- Registers an `Overflow Meter` group with one stat per enabled row and a collector, which
 -- Another Scoreboard calls before it shows its values: the collector rereads the teammates'
 -- shared totals and flushes the snapshot. Stats use `set` accumulation, so every publish replaces
--- the value. When the enabled rows change, the registration is rebuilt with the new set.
+-- the value. When the enabled rows change, the registration is rebuilt with the new set. A metric
+-- that does not apply to a player's build is never published, so Another Scoreboard shows its
+-- own `—` for it and leaves the player out of that row's ranking.
 --
 -- Explicit module loaded by `OverflowMeter.lua`; it registers itself with the snapshot and
 -- becomes active in `setup` once Another Scoreboard with a matching API version is found.
@@ -231,7 +233,7 @@ Adapter.prepare = function ()
     end
 end
 
---- Writes an entry's values into our registered stats.
+--- Writes an entry's values into our registered stats, skipping those that do not apply to its build.
 -- tab: entry snapshot entry
 Adapter.publish = function (entry)
     local scoreboard = target
@@ -245,7 +247,7 @@ Adapter.publish = function (entry)
     for i = 1, METRIC_COUNT do
         local stat_key = stat_keys[i]
 
-        if stat_key then
+        if stat_key and Snapshot.is_available(entry, METRICS[i]) then
             scoreboard:update_external_stat(stat_key, account_id, entry[FIELDS[i]])
         end
     end

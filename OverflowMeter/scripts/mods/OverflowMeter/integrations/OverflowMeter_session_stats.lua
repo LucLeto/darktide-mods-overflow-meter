@@ -9,8 +9,9 @@
 -- The player picks the metric of each slot (`session_stats_row_1` to `_3`) and can turn the
 -- feature off (`session_stats_rows`). Slots set to Off are skipped without a gap, and a metric
 -- already shown is not repeated. Values are the local player's totals, marked `~` when estimated;
--- the team column stays empty because only players running the mod have these values. Nothing is
--- added unless something was generated this mission, the same rule as the chat line.
+-- Shared and the efficiency read `-` for a build without a sharing talent. The team column stays
+-- empty because only players running the mod have these values. Nothing is added unless
+-- something was generated this mission, the same rule as the chat line.
 --
 -- Explicit module loaded by `OverflowMeter.lua`. The panel class is only loaded with the end-of-
 -- round screen, so it is hooked by name; DMF applies the hook before the panel's first `init`.
@@ -46,10 +47,12 @@ local SLOT_SETTING_IDS = {
 
 local RATE_MODE_PER_ALLY = "per_ally"
 local ESTIMATE_PREFIX = "~"
+local UNAVAILABLE_TEXT = "-"
 
 --- The metrics a slot can show, by setting value.
--- Each has its label key, whether it is an estimate, an optional suffix and a function returning
--- the current total. Shared follows the `Rate display` setting like the chat line.
+-- Each has its label key, whether it is an estimate, whether it is a `share` value that only
+-- applies with a sharing talent, an optional suffix and a function returning the current total.
+-- Shared follows the `Rate display` setting like the chat line.
 local METRICS = {
     generated = {
         loc = "session_stats_metric_generated",
@@ -75,6 +78,7 @@ local METRICS = {
     shared = {
         loc = "session_stats_metric_shared",
         estimated = true,
+        share = true,
         value = function ()
             return mod._settings.rate_mode ~= RATE_MODE_PER_ALLY and Stats.shared_total or Stats.shared
         end
@@ -82,6 +86,7 @@ local METRICS = {
     efficiency = {
         loc = "session_stats_metric_efficiency",
         estimated = true,
+        share = true,
         suffix = "%",
         value = function ()
             return Stats.efficiency() * 100
@@ -127,10 +132,15 @@ local function _choose_metrics(settings)
     return count
 end
 
---- Formats a metric's current total, rounded like the chat line.
+--- Formats a metric's current total, rounded like the chat line, or `-` for a share metric of a
+-- build without a sharing talent.
 -- tab: metric entry of `METRICS`
 -- treturn: string
 local function _format_value(metric)
+    if metric.share and not Stats.has_share_metrics then
+        return UNAVAILABLE_TEXT
+    end
+
     local prefix = metric.estimated and ESTIMATE_PREFIX or ""
 
     return string_format("%s%d%s", prefix, math_floor(metric.value() + 0.5), metric.suffix or "")

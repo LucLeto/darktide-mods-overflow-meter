@@ -9,6 +9,10 @@
 -- interval and again when the end-of-round screen opens. Payloads are size-capped (250 bytes out,
 -- 1 KiB in) and decoded defensively.
 --
+-- Payload version 2 adds `sh`, whether the build has a sharing talent. Without one the payload
+-- leaves the share values out, and a version 1 reader takes them as 0. A version 1 payload has no
+-- `sh` and always comes from a build with a sharing talent.
+--
 -- Explicit module loaded by `OverflowMeter.lua` and stored as `mod._share`. Turning off
 -- `share_mission_summary` withdraws the published payload; teammates' payloads are still read.
 -- module: OverflowMeter_share
@@ -32,7 +36,7 @@ local type = type
 
 --- Presence key and payload format version.
 local KEY = "overflow_meter_summary"
-local PAYLOAD_VERSION = 1
+local PAYLOAD_VERSION = 2
 
 --- Size caps for the published payload and for a payload read from a teammate.
 local MAX_PUBLISH_BYTES = 250
@@ -58,14 +62,16 @@ local debug_logged = false
 local peer_raw = {}
 
 --- Reused payload table. The short keys keep the encoded summary small: `a` archetype,
--- `g` generated, `r` replenished, `o` overflowed, `s` shared per ally, `st` shared with all
--- allies and `e` efficiency in percent.
+-- `g` generated, `r` replenished, `o` overflowed, `sh` 1 with a sharing talent and 0 without,
+-- and only with one `s` shared per ally, `st` shared with all allies and `e` efficiency in
+-- percent.
 local payload = {
     pv = PAYLOAD_VERSION,
     a = "",
     g = 0,
     r = 0,
     o = 0,
+    sh = 1,
     s = 0,
     st = 0,
     e = 0
@@ -76,6 +82,8 @@ local payload = {
 -- ----------------------------------------------------------------------------
 
 --- Encodes the local totals as the payload.
+-- Without a sharing talent the share values are cleared from the reused table, so they are left
+-- out of the encoded payload.
 -- treturn: ?string JSON payload, or nil when sharing is off, nothing was generated yet, or the
 -- payload would exceed the size cap
 local function _encode_summary()
@@ -93,9 +101,18 @@ local function _encode_summary()
     payload.g = math_floor(Stats.generated + 0.5)
     payload.r = math_floor(Stats.replenished + 0.5)
     payload.o = math_floor(Stats.overflowed + 0.5)
-    payload.s = math_floor(Stats.shared + 0.5)
-    payload.st = math_floor(Stats.shared_total + 0.5)
-    payload.e = math_floor(Stats.efficiency() * 100 + 0.5)
+
+    if Stats.has_share_metrics then
+        payload.sh = 1
+        payload.s = math_floor(Stats.shared + 0.5)
+        payload.st = math_floor(Stats.shared_total + 0.5)
+        payload.e = math_floor(Stats.efficiency() * 100 + 0.5)
+    else
+        payload.sh = 0
+        payload.s = nil
+        payload.st = nil
+        payload.e = nil
+    end
 
     local ok, encoded = pcall(cjson.encode, payload)
 

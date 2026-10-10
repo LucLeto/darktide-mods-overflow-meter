@@ -4,6 +4,10 @@
 -- marked dirty when they change, and publishing hands the dirty ones to every active scoreboard
 -- adapter. `METRICS` defines the five rows every adapter builds from.
 --
+-- An entry of a build without a sharing talent has `has_share_metrics` false and its share values
+-- at 0. `is_available` tells adapters which values do not apply, so they can show them as missing
+-- where their scoreboard can, and as the 0 otherwise.
+--
 -- An adapter is a table with a `name`, an `active` flag and `publish(entry)`, plus the optional
 -- callbacks `setup` (all mods loaded), `prepare` (once before each publish), `reset` (new
 -- mission or toggle), `refresh` (settings changed) and `teardown` (mod disabled or unloaded).
@@ -31,13 +35,14 @@ local RATE_MODE_PER_ALLY = "per_ally"
 local Snapshot = {}
 
 --- Version of the entry layout.
-Snapshot.SCHEMA_VERSION = 1
+Snapshot.SCHEMA_VERSION = 2
 
 --- The five scoreboard rows, in display order.
 -- Each names its entry `field`, scoreboard `row`, label key `loc` (and `loc_short` where a
--- scoreboard needs a shorter label), the `setting` that enables it, and whether the value is
--- `observed` (read from the bar) rather than estimated. Shared reads `shared_display`, which
--- follows the `Rate display` setting.
+-- scoreboard needs a shorter label), the `setting` that enables it, whether the value is
+-- `observed` (read from the bar) rather than estimated, and whether it is a `share` value that
+-- only applies with a sharing talent. Shared reads `shared_display`, which follows the
+-- `Rate display` setting.
 Snapshot.METRICS = {
     {
         id = "generated",
@@ -45,7 +50,8 @@ Snapshot.METRICS = {
         row = "overflow_meter_generated",
         loc = "scoreboard_generated",
         setting = "scoreboard_row_generated",
-        observed = false
+        observed = false,
+        share = false
     },
     {
         id = "replenished",
@@ -53,7 +59,8 @@ Snapshot.METRICS = {
         row = "overflow_meter_replenished",
         loc = "scoreboard_replenished",
         setting = "scoreboard_row_replenished",
-        observed = true
+        observed = true,
+        share = false
     },
     {
         id = "overflowed",
@@ -61,7 +68,8 @@ Snapshot.METRICS = {
         row = "overflow_meter_overflowed",
         loc = "scoreboard_overflowed",
         setting = "scoreboard_row_overflowed",
-        observed = false
+        observed = false,
+        share = false
     },
     {
         id = "shared",
@@ -69,7 +77,8 @@ Snapshot.METRICS = {
         row = "overflow_meter_shared",
         loc = "scoreboard_shared",
         setting = "scoreboard_row_shared",
-        observed = false
+        observed = false,
+        share = true
     },
     {
         id = "efficiency",
@@ -78,7 +87,8 @@ Snapshot.METRICS = {
         loc = "scoreboard_efficiency",
         loc_short = "scoreboard_efficiency_short",
         setting = "scoreboard_row_efficiency",
-        observed = false
+        observed = false,
+        share = true
     }
 }
 
@@ -177,6 +187,7 @@ local function _entry(account_id)
         shared_total = 0,
         shared_display = 0,
         efficiency = 0,
+        has_share_metrics = true,
         remote = false,
         dirty = false
     }
@@ -203,7 +214,17 @@ Snapshot.is_observed = function (entry, metric)
     return metric.observed and not entry.remote
 end
 
+--- Returns whether a metric applies to an entry's build.
+-- Shared and the efficiency do not apply to a build without a sharing talent.
+-- tab: entry snapshot entry
+-- tab: metric entry of `METRICS`
+-- treturn: bool
+Snapshot.is_available = function (entry, metric)
+    return not metric.share or entry.has_share_metrics
+end
+
 --- Copies the local totals into the local player's entry, rounded to whole numbers.
+-- The share values are 0 for a build without a sharing talent.
 -- ?string: account_id local player's account id; nothing happens without one
 -- ?string: archetype archetype name, defaulting to the statistics' archetype
 -- treturn: ?tab entry
@@ -215,10 +236,12 @@ Snapshot.update_local = function (account_id, archetype)
     local_account_id = account_id
 
     local entry = _entry(account_id)
-    local shared = math_floor(Stats.shared + 0.5)
-    local shared_total = math_floor(Stats.shared_total + 0.5)
+    local has_share_metrics = Stats.has_share_metrics
+    local shared = has_share_metrics and math_floor(Stats.shared + 0.5) or 0
+    local shared_total = has_share_metrics and math_floor(Stats.shared_total + 0.5) or 0
 
     entry.archetype = archetype or Stats.archetype
+    entry.has_share_metrics = has_share_metrics
     entry.remote = false
     entry.generated = math_floor(Stats.generated + 0.5)
     entry.replenished = math_floor(Stats.replenished + 0.5)
@@ -226,7 +249,7 @@ Snapshot.update_local = function (account_id, archetype)
     entry.shared = shared
     entry.shared_total = shared_total
     entry.shared_display = mod._settings.rate_mode ~= RATE_MODE_PER_ALLY and shared_total or shared
-    entry.efficiency = math_floor(Stats.efficiency() * 100 + 0.5)
+    entry.efficiency = has_share_metrics and math_floor(Stats.efficiency() * 100 + 0.5) or 0
 
     _mark_dirty(entry)
 
@@ -234,6 +257,8 @@ Snapshot.update_local = function (account_id, archetype)
 end
 
 --- Copies a teammate's decoded payload into their entry, sanitising every value.
+-- A payload with `sh` 0 comes from a build without a sharing talent, and its share values are 0.
+-- Version 1 payloads have no `sh`; they were only published by builds with a sharing talent.
 -- ?string: account_id teammate's account id
 -- ?tab: peer decoded payload from `OverflowMeter_share.lua`
 -- treturn: ?tab entry
@@ -243,10 +268,12 @@ Snapshot.update_peer = function (account_id, peer)
     end
 
     local entry = _entry(account_id)
-    local shared = _stat(peer.s)
-    local shared_total = _stat(peer.st)
+    local has_share_metrics = peer.sh ~= 0
+    local shared = has_share_metrics and _stat(peer.s) or 0
+    local shared_total = has_share_metrics and _stat(peer.st) or 0
 
     entry.archetype = type(peer.a) == "string" and peer.a or nil
+    entry.has_share_metrics = has_share_metrics
     entry.remote = true
     entry.generated = _stat(peer.g)
     entry.replenished = _stat(peer.r)
@@ -254,7 +281,7 @@ Snapshot.update_peer = function (account_id, peer)
     entry.shared = shared
     entry.shared_total = shared_total
     entry.shared_display = mod._settings.rate_mode ~= RATE_MODE_PER_ALLY and shared_total or shared
-    entry.efficiency = _percent(peer.e)
+    entry.efficiency = has_share_metrics and _percent(peer.e) or 0
 
     _mark_dirty(entry)
 

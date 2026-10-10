@@ -4,6 +4,10 @@
 -- generated, replenished, overflowed and shared totals and the share efficiency. Values are in
 -- Toughness points; `version` changes with every update so consumers can skip unchanged data.
 --
+-- Generated, replenished and overflowed apply to every tracked build. Shared and the efficiency
+-- only apply with a sharing talent (Power Overflow or Born Leader); `has_share_metrics` tells
+-- consumers whether they do, so they can show them as unavailable rather than as 0.
+--
 -- Explicit module loaded first by `OverflowMeter.lua` and stored as `mod._stats`. The totals
 -- are module-level, so they outlive the HUD element and are still readable on the end-of-round
 -- screen. They reset when a mission starts, when the archetype changes and when the mod is
@@ -29,7 +33,11 @@ Stats.archetype = nil
 
 Stats.shareable = 0
 
---- Change counter, bumped by every reset and by every event that changed a total.
+--- Whether the build has a sharing talent, so Shared and the efficiency apply to it.
+Stats.has_share_metrics = false
+
+--- Change counter, bumped by every reset, by every event that changed a total and when
+-- `has_share_metrics` changes.
 Stats.version = 0
 
 --- Clears every total and bumps the version.
@@ -44,10 +52,18 @@ Stats.reset = function ()
 end
 
 --- Sets the talent's share fraction and resets the totals when the archetype changes.
--- ?string: archetype archetype name, such as `cryptic` or `veteran`
--- ?number: talent_share_fraction fraction offered to each ally
+-- A fraction of 0 means the build has no sharing talent.
+-- ?string: archetype archetype name, such as `cryptic`, `veteran` or `zealot`
+-- ?number: talent_share_fraction fraction offered to each ally, 0 or nil without a sharing talent
 Stats.set_context = function (archetype, talent_share_fraction)
     share_fraction = talent_share_fraction or 0
+
+    local has_share_metrics = share_fraction > 0
+
+    if has_share_metrics ~= Stats.has_share_metrics then
+        Stats.has_share_metrics = has_share_metrics
+        Stats.version = Stats.version + 1
+    end
 
     if archetype ~= Stats.archetype then
         Stats.archetype = archetype
