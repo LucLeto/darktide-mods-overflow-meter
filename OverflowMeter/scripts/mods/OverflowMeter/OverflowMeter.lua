@@ -230,6 +230,12 @@ mod._share = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMet
 -- Optional rows in the game's own Session Stats panel on the end-of-round screen.
 mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/integrations/OverflowMeter_session_stats")
 
+--- TEMPORARY: whether the solo-play comparison with the game's own Toughness accounting is loaded
+-- (`OverflowMeter_debug_truth.lua`). Remove before release, with the module and its three calls.
+local DEBUG_TRUTH = true
+
+mod._debug_truth = DEBUG_TRUTH and mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_debug_truth") or nil
+
 -- ----------------------------------------------------------------------------
 -- Shared hooks
 -- ----------------------------------------------------------------------------
@@ -426,6 +432,18 @@ mod.on_game_state_changed = function (status, state_name)
             end
         end
 
+        -- TEMPORARY: solo-play comparison, reset when a mission starts and reported when it ends
+        -- (missions without an end-of-round screen, such as the Psykhanium, only end here).
+        local debug_truth = mod._debug_truth
+
+        if debug_truth then
+            if status == "enter" then
+                debug_truth.reset()
+            else
+                debug_truth.report()
+            end
+        end
+
         disable_all_pulses()
     end
 end
@@ -479,6 +497,11 @@ end
 mod:hook_safe("EndView", "on_enter", function ()
     echo_mission_summary()
 
+    -- TEMPORARY: solo-play comparison.
+    if mod._debug_truth then
+        mod._debug_truth.report()
+    end
+
     mod._share.push_peers()
     mod._snapshot.flush()
 end)
@@ -498,6 +521,11 @@ mod.update = function (dt)
     -- TEMPORARY: replenish debug summaries.
     if DEBUG_REPLENISH then
         _debug_flush_replenish(dt)
+    end
+
+    -- TEMPORARY: solo-play comparison totals.
+    if mod._debug_truth then
+        mod._debug_truth.update(dt)
     end
 end
 
