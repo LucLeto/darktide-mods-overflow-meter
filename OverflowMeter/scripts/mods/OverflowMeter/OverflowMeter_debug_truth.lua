@@ -15,6 +15,11 @@
 -- game restores without a reason (`<nil>`) are labelled by the mod and summed onto `<nil>`
 -- (`MOD_TAG_REASONS`). Only the Zealot module labels its sources so far.
 --
+-- It also records, for every restore the server applied before the mod saw it (kills, procs, the
+-- lunge), whether the replicated bar already showed it, and the overflow the old headroom read
+-- (the current bar) and the new one (`record_headroom`) gave. That part works on a client too, so
+-- multiplayer missions show how often the bar is ahead of the event.
+--
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
 -- Remove before release, together with its load line, its three calls there and the `record_mod`
 -- calls in `OverflowMeter_pulses_zealot.lua` and the HUD element.
@@ -57,8 +62,12 @@ local Truth = {}
 -- already.
 local reasons = {}
 local mod_sources = {}
+local headroom = {}
 local timer = 0
 local reported = false
+
+--- Below this many Toughness points the bar counts as full, and a change as none.
+local EPSILON = 0.5
 
 --- Returns the local player's unit, if any.
 -- treturn: ?param unit
@@ -160,6 +169,46 @@ Truth.record_mod = function (source, wanted, overflowed)
     entry.overflowed = entry.overflowed + overflowed
 end
 
+--- Adds how the bar looked when a restore the server already applied reached the mod.
+-- `full` when the bar was full at the last sample and still is, `refilled` when it already rose
+-- by at least half of what the restore could fill, `pending` otherwise.
+-- ?string: source label of the source
+-- number: wanted wanted restore in Toughness points
+-- number: damage missing Toughness when the restore arrived
+-- number: sample_damage missing Toughness at the last sample
+-- number: old_excess wanted minus the current missing Toughness (the old headroom read)
+-- number: new_excess the excess counted now
+Truth.record_headroom = function (source, wanted, damage, sample_damage, old_excess, new_excess)
+    local key = source or "<untagged>"
+    local entry = headroom[key]
+
+    if not entry then
+        entry = {
+            events = 0,
+            full = 0,
+            refilled = 0,
+            pending = 0,
+            old_overflowed = 0,
+            new_overflowed = 0
+        }
+        headroom[key] = entry
+    end
+
+    local fillable = wanted < sample_damage and wanted or sample_damage
+
+    if sample_damage < EPSILON and damage < EPSILON then
+        entry.full = entry.full + 1
+    elseif fillable >= EPSILON and sample_damage - damage >= 0.5 * fillable then
+        entry.refilled = entry.refilled + 1
+    else
+        entry.pending = entry.pending + 1
+    end
+
+    entry.events = entry.events + 1
+    entry.old_overflowed = entry.old_overflowed + (old_excess > 0 and old_excess or 0)
+    entry.new_overflowed = entry.new_overflowed + (new_excess > 0 and new_excess or 0)
+end
+
 --- Returns the mod's sums for a game reason, over every label that maps onto it.
 -- string: reason game reason
 -- treturn: ?number events, nil when no label maps onto the reason
@@ -189,6 +238,10 @@ Truth.reset = function ()
         mod_sources[key] = nil
     end
 
+    for key in pairs(headroom) do
+        headroom[key] = nil
+    end
+
     timer = 0
     reported = false
 end
@@ -211,14 +264,29 @@ Truth.update = function (dt)
     mod:info("%s", _totals_line("running"))
 end
 
---- Logs the per-reason breakdown and the totals, and writes a comparison line to the local chat,
--- once per mission and only if anything was recorded.
+--- Logs the bar state per source for the restores the server applied before the mod saw them.
+local function _report_headroom()
+    for key, entry in pairs(headroom) do
+        mod:info("[OFM] headroom source=%s events=%d full=%d refilled=%d pending=%d overflowed old=%.1f new=%.1f", key, entry.events, entry.full, entry.refilled, entry.pending, entry.old_overflowed, entry.new_overflowed)
+    end
+end
+
+--- Logs the bar states, and when hosting the per-reason breakdown and the totals with a comparison
+-- line in the local chat; once per mission and only if anything was recorded.
 Truth.report = function ()
-    if reported or next(reasons) == nil then
+    local has_game = next(reasons) ~= nil
+
+    if reported or (not has_game and next(headroom) == nil) then
         return
     end
 
     reported = true
+
+    _report_headroom()
+
+    if not has_game then
+        return
+    end
 
     local keys = {}
 

@@ -10,6 +10,12 @@
 -- points, each sample. The Zealot shares nothing, so the burst queues of the sharing archetypes
 -- always read 0.
 --
+-- The clamped excess needs the missing Toughness from before the restore. The replenish requests
+-- arrive before the game applies them, so the bar is current for them. Kills, procs and the lunge
+-- are seen only after the server has restored Toughness, and by then the bar can already show the
+-- restore (when hosting it always does). For those the missing Toughness at the last sample is
+-- used as well, less what the restores counted since then took up.
+--
 -- After a misprediction the client re-simulates the local unit's last frames, running its buffs
 -- and character states again. Replenish requests and lunges seen while the unit re-simulates were
 -- already counted the first time, so they are ignored.
@@ -47,12 +53,15 @@ local SOURCE_BLESSING = "blessing"
 local NEVER = -math.huge
 
 --- Pulse state.
--- Besides the queue and the local Zealot's unit, extensions and talent flags, it holds the
--- modelled timers: when the elite-kill regeneration ends and the last counted Shroudfield
--- restore and Chastise dash.
+-- Besides the queue and the local Zealot's unit, extensions and talent flags, it holds the missing
+-- Toughness at the last sample and how much of it the restores since then took up, and the
+-- modelled timers: when the elite-kill regeneration ends and the last counted Shroudfield restore
+-- and Chastise dash.
 local Pulses = {
     enabled = false,
     pending_excess = 0,
+    sample_damage = 0,
+    used_headroom = 0,
     unit = nil,
     buff_extension = nil,
     toughness_extension = nil,
@@ -106,6 +115,8 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.has_elite_kill_talent = _has_talent_buff(talent_extension, Sources.elite_kill_talent_buff_name)
 
     if not same_unit then
+        Pulses.sample_damage = toughness_extension:toughness_damage()
+        Pulses.used_headroom = 0
         Pulses.elite_regen_until = 0
         Pulses.last_stealth_t = NEVER
         Pulses.last_lunge_t = NEVER
@@ -116,6 +127,8 @@ end
 Pulses.disable = function()
     Pulses.enabled = false
     Pulses.pending_excess = 0
+    Pulses.sample_damage = 0
+    Pulses.used_headroom = 0
     Pulses.unit = nil
     Pulses.buff_extension = nil
     Pulses.toughness_extension = nil
@@ -129,11 +142,16 @@ Pulses.disable = function()
 end
 
 --- Returns and clears the clamped excess of the restores since the last sample.
+-- The HUD element calls it once per sample, so it also takes the missing Toughness of this sample
+-- as the reference for the restores that follow.
 -- treturn: number Toughness points
 Pulses.consume = function()
     local pending_excess = Pulses.pending_excess
+    local toughness_extension = Pulses.toughness_extension
 
     Pulses.pending_excess = 0
+    Pulses.sample_damage = toughness_extension and toughness_extension:toughness_damage() or 0
+    Pulses.used_headroom = 0
 
     return pending_excess
 end
@@ -155,9 +173,14 @@ end
 -- ----------------------------------------------------------------------------
 
 --- Adds the part of a wanted restore that exceeds the missing Toughness to the excess queue.
+-- A restore seen before the game applies it uses the current missing Toughness. One seen after
+-- the server applied it uses the larger of the current missing Toughness and the missing Toughness
+-- at the last sample less what the restores since then took up, because the bar may already show
+-- this restore.
 -- ?number: wanted wanted restore in Toughness points; ignored unless positive
 -- string: source label of the source
-local function _accumulate_wanted(wanted, source)
+-- ?bool: before_applied true when the restore is seen before the game applies it
+local function _accumulate_wanted(wanted, source, before_applied)
     if not wanted or wanted <= 0 then
         return
     end
@@ -168,18 +191,36 @@ local function _accumulate_wanted(wanted, source)
         return
     end
 
-    local headroom = toughness_extension:toughness_damage()
+    local damage = toughness_extension:toughness_damage()
+    local headroom = damage
+
+    if not before_applied then
+        local remaining = Pulses.sample_damage - Pulses.used_headroom
+
+        if remaining > headroom then
+            headroom = remaining
+        end
+    end
+
     local excess = wanted - headroom
 
     if excess > 0 then
         Pulses.pending_excess = Pulses.pending_excess + excess
+        Pulses.used_headroom = Pulses.used_headroom + headroom
+    else
+        Pulses.used_headroom = Pulses.used_headroom + wanted
     end
 
-    -- TEMPORARY: per-source figures for the solo-play comparison.
+    -- TEMPORARY: per-source figures for the solo-play comparison, and how the bar looked when a
+    -- restore applied by the server arrived.
     local debug_truth = mod._debug_truth
 
     if debug_truth then
         debug_truth.record_mod(source, wanted, excess > 0 and excess or 0)
+
+        if not before_applied then
+            debug_truth.record_headroom(source, wanted, damage, Pulses.sample_damage, wanted - damage, excess)
+        end
     end
 end
 
@@ -188,7 +229,8 @@ end
 -- ?bool: apply_replenish_stat_buffs scale by `toughness_replenish_modifier` and
 -- `toughness_replenish_multiplier`, as the game does for restores that use stat buffs
 -- string: source label of the source
-local function _add_pulse(fraction, apply_replenish_stat_buffs, source)
+-- ?bool: before_applied true when the restore is seen before the game applies it
+local function _add_pulse(fraction, apply_replenish_stat_buffs, source, before_applied)
     if not fraction or fraction <= 0 then
         return
     end
@@ -210,7 +252,7 @@ local function _add_pulse(fraction, apply_replenish_stat_buffs, source)
         end
     end
 
-    _accumulate_wanted(wanted, source)
+    _accumulate_wanted(wanted, source, before_applied)
 end
 
 --- Records the base melee-kill restore, scaled the way the game's toughness template does.
@@ -412,7 +454,7 @@ Pulses.on_replenish_percentage = function(unit, fixed_percentage, ignore_stat_bu
         Pulses.last_stealth_t = now
     end
 
-    _add_pulse(fixed_percentage, not ignore_stat_buffs, reason)
+    _add_pulse(fixed_percentage, not ignore_stat_buffs, reason, true)
 end
 
 -- ----------------------------------------------------------------------------
