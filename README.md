@@ -313,7 +313,7 @@ The Zealot has no Toughness-sharing talent, so there is no live meter; only the 
 | In-melee regeneration (`zealot_toughness_in_melee`) | 2.5 % per second plus 1 % per additional enemy within 5 m, up to 7.5 %/s. | The talent's own client-side replenish request. |
 | Momentum (Inexorable Judgement) | 0.5 %/s per Momentum stack while its bonus is active. | The talent's own client-side replenish request. |
 | Fanatic Rage at maximum | 2 %/s while at maximum Fanatic Rage stacks. | The talent's own client-side replenish request. |
-| Weapon blessings | Fixed-percentage blessings, including the Flamer's continuous-fire restore; ignore stat buffs. | The proc activation the server reports to you. |
+| Weapon blessings | Fixed-percentage blessings, including the Flamer's continuous-fire restore; ignore stat buffs. The multi-hit blessings of the Heavy Eviscerator and the Thunder Hammer restore 12–15 % per proc depending on tier, and do scale with stat buffs. | The proc activation the server reports to you. |
 
 **How the client-side replenish requests work.** Several Zealot buffs run their update functions on your own client too, and ask the game to replenish your Toughness there. On a client that request does nothing, because the server owns your Toughness, but the mod can see it. That makes it an exact feed for these sources at full Toughness. Only a fixed list of reasons for your own character is counted, so nothing is double-counted against the other paths.
 

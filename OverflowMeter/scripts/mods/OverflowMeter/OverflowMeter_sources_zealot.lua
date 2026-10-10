@@ -96,6 +96,16 @@ local WEAPON_TOUGHNESS_PROC_TEMPLATES = {
     weapon_trait_bespoke_powermaul_shield_p1_toughness_recovery_on_chained_attacks = true
 }
 
+--- Multi-hit blessings of the Heavy Eviscerator, the Thunder Hammer and the two-handed force
+-- sword (`base_weapon_trait_buff_templates.toughness_recovery_on_multiple_hits`). Their restore is
+-- the tier's `buff_data.replenish_percentage` and, unlike the other blessings, it is scaled by the
+-- Toughness stat buffs. They are also listed in `WEAPON_TOUGHNESS_PROC_TEMPLATES`.
+local MULTIPLE_HITS_TEMPLATES = {
+    weapon_trait_bespoke_chainsword_2h_p1_toughness_recovery_on_multiple_hits = true,
+    weapon_trait_bespoke_forcesword_2h_p1_toughness_recovery_on_multiple_hits = true,
+    weapon_trait_bespoke_thunderhammer_2h_p1_toughness_recovery_on_multiple_hits = true
+}
+
 --- Continuous-fire blessings, whose restore is multiplied by the current fire step (up to 5).
 local CONTINUOUS_FIRE_TEMPLATES = {
     weapon_trait_bespoke_arc_rifle_p1_toughness_on_continuous_fire = true,
@@ -130,6 +140,7 @@ return {
     end,
 
     weapon_toughness_proc_templates = WEAPON_TOUGHNESS_PROC_TEMPLATES,
+    multiple_hits_templates = MULTIPLE_HITS_TEMPLATES,
     continuous_fire_templates = CONTINUOUS_FIRE_TEMPLATES,
     max_continuous_fire_steps = 5,
     talent_toughness_proc_templates = TALENT_TOUGHNESS_PROC_TEMPLATES,

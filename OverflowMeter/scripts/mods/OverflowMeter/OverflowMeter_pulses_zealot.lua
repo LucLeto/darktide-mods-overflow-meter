@@ -293,7 +293,9 @@ end
 --- Records a weapon blessing or Zealot talent proc of the local player.
 -- A blessing restores the fixed percentage from its tier's override data, or else the template,
 -- multiplied by the fire step (at most 5) for continuous fire, and ignores Toughness stat buffs.
--- A talent proc restores its template's `toughness_percentage`, scaled by the stat buffs.
+-- A multi-hit blessing restores its tier's `buff_data.replenish_percentage` instead, scaled by the
+-- stat buffs. A talent proc restores its template's `toughness_percentage`, scaled by the stat
+-- buffs.
 -- tab: buff_extension buff extension whose proc became active
 -- ?int: index index of the buff instance
 Pulses.on_proc_active = function(buff_extension, index)
@@ -326,6 +328,15 @@ Pulses.on_proc_active = function(buff_extension, index)
     local template_context = buff_instance.template_context and buff_instance:template_context()
     local override_data = template_context and template_context.template_override_data
     local template = buff_instance.template and buff_instance:template()
+
+    if Sources.multiple_hits_templates[template_name] then
+        local buff_data = override_data and override_data.buff_data or template and template.buff_data
+
+        _add_pulse(buff_data and buff_data.replenish_percentage, true, SOURCE_BLESSING)
+
+        return
+    end
+
     local fixed_percentage = override_data and override_data.toughness_fixed_percentage or template and template.toughness_fixed_percentage
 
     if not fixed_percentage then
