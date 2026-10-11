@@ -1,8 +1,9 @@
 --- The HUD element that samples Toughness and draws the meter and the summary panel.
 -- Once a second it checks whether the local player is in a mission as a tracked archetype
--- (Skitarii, Veteran or Zealot) and wires up that archetype's sources and pulse module; sharing is
--- tracked as well when the build has its archetype's sharing talent (a Skitarius with Power
--- Overflow or a Veteran with Born Leader). Four times a second it samples: it measures what the
+-- (Skitarii, Veteran, Zealot or Psyker) and wires up that archetype's sources and pulse module;
+-- sharing is tracked as well when the build has its archetype's sharing talent (a Skitarius with
+-- Power Overflow or a Veteran with Born Leader). A pulse module that follows a value every frame
+-- (the Psyker's Peril) is updated every frame. Four times a second it samples: it measures what the
 -- replicated Toughness bar gained, sums the active continuous sources (Skitarii) or the modelled
 -- at-full regeneration (every other archetype), drains the pulse queues and adds the sample to
 -- the mission statistics. With a sharing talent it also counts the allies in Coherency and those
@@ -477,7 +478,8 @@ end
 -- Reapplies the display settings after a change and resets after a reset request. Once a second
 -- it follows Custom HUD changes, rechecks support and pushes the scoreboard snapshot. The summary
 -- panel refreshes every frame when its data changed; while supported and the player unit is
--- alive, Toughness is sampled and the meter refreshed every `SAMPLE_INTERVAL`.
+-- alive, a pulse module with an `update` function is updated every frame, and Toughness is
+-- sampled and the meter refreshed every `SAMPLE_INTERVAL`.
 -- number: dt frame delta time
 -- number: t time
 -- tab: ui_renderer UI renderer
@@ -552,6 +554,12 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
         self:_reset_display()
 
         return
+    end
+
+    local update_pulses = self._pulses.update
+
+    if update_pulses then
+        update_pulses()
     end
 
     self._sample_timer = self._sample_timer - dt
@@ -994,9 +1002,10 @@ HudElementOverflowMeter._sample_bar_gain = function (self)
         end
     end
 
-    -- TEMPORARY: the modelled at-full regeneration for the solo-play comparison.
+    -- TEMPORARY: the modelled at-full regeneration for the solo-play comparison, under the pulse
+    -- module's label when it has one.
     if continuous_overflow > 0 and mod._debug_truth then
-        mod._debug_truth.record_mod("continuous_model", continuous_overflow, continuous_overflow)
+        mod._debug_truth.record_mod(pulses.continuous_source or "continuous_model", continuous_overflow, continuous_overflow)
     end
 
     local burst_share = pulses.consume_burst()

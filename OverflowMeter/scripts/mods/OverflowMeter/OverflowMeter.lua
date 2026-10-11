@@ -4,10 +4,10 @@
 --
 -- Every setting is cached in `mod._settings` and refreshed per changed id. The modules are
 -- loaded in dependency order through `mod:io_dofile` and stored on `mod`: the mission
--- statistics, the Skitarii, Veteran and Zealot sources and pulses, the scoreboard snapshot with
--- its optional adapters, mission summary sharing and the Session Stats rows. The HUD element
--- (`ui/OverflowMeter_hud_element.lua`) is registered last and reaches everything through these
--- `mod` fields.
+-- statistics, the Skitarii, Veteran, Zealot and Psyker sources and pulses, the scoreboard
+-- snapshot with its optional adapters, mission summary sharing and the Session Stats rows. The
+-- HUD element (`ui/OverflowMeter_hud_element.lua`) is registered last and reaches everything
+-- through these `mod` fields.
 --
 -- DMF keeps only one hook per mod and method, so the hooks several pulse modules need
 -- (`PlayerUnitBuffExtension._set_proc_active_start_time`,
@@ -194,6 +194,8 @@ mod._sources_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/O
 mod._pulses_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_veteran")
 mod._sources_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_zealot")
 mod._pulses_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_zealot")
+mod._sources_psyker = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_psyker")
+mod._pulses_psyker = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_psyker")
 
 --- Source models by archetype name, as returned by `player:archetype_name()` (Skitarii is `cryptic`).
 -- An archetype listed here has its mission statistics tracked; the live meter additionally needs
@@ -201,14 +203,16 @@ mod._pulses_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/Ove
 mod._sources_by_archetype = {
     cryptic = mod._sources,
     veteran = mod._sources_veteran,
-    zealot = mod._sources_zealot
+    zealot = mod._sources_zealot,
+    psyker = mod._sources_psyker
 }
 
 --- Pulse modules by archetype name; the HUD element enables the one for the local player.
 mod._pulses_by_archetype = {
     cryptic = mod._pulses,
     veteran = mod._pulses_veteran,
-    zealot = mod._pulses_zealot
+    zealot = mod._pulses_zealot,
+    psyker = mod._pulses_psyker
 }
 
 --- The pulse module the HUD element enabled for the local player, or nil. The shared hooks

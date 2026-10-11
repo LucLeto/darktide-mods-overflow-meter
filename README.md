@@ -1,7 +1,7 @@
 # darktide-mods-overflow-meter
 Overflow Meter adds a multiplayer-focused HUD for the invisible Toughness-sharing talents: the **Skitarii** *Power Overflow* and the **Veteran** *Born Leader*. Both are processed by the server and share none of their values with multiplayer clients, so the mod estimates when and how effectively you share Toughness with nearby teammates, showing Coherency, team demand, and approximate Toughness offered in real time. The meter detects your class automatically and adapts its labels and estimation model to whichever talent you have equipped.
 
-Its [mission summary](#mission-summary) - how much Toughness you generated, how much of it replenished you and how much overflowed against your cap - does not need a sharing talent: it is tracked for Skitarii and Veterans with or without their sharing talent, and for **Zealots**.
+Its [mission summary](#mission-summary) - how much Toughness you generated, how much of it replenished you and how much overflowed against your cap - does not need a sharing talent: it is tracked for Skitarii and Veterans with or without their sharing talent, and for **Zealots** and **Psykers**.
 
 ## Display
 
@@ -53,7 +53,7 @@ Binding it to `TAB` pairs it with the game's own Tactical Overlay, so both appea
 
 **Only `Replenished` is observed**, read from your own replicated Toughness bar. Everything else is inferred and is therefore prefixed with `~`, the same estimate marker the live meter uses.
 
-**Builds without a sharing talent.** Generated, Replenished and Overflowed are tracked for every supported class: Skitarii and Veterans with or without their sharing talent, and Zealots ([sources](#zealot-replenishment-sources)). Other classes are not tracked yet. Shared and Efficiency only apply with Power Overflow or Born Leader, so for every other build they are shown as *not applicable* rather than as 0:
+**Builds without a sharing talent.** Generated, Replenished and Overflowed are tracked for every supported class: Skitarii and Veterans with or without their sharing talent, Zealots ([sources](#zealot-replenishment-sources)) and Psykers ([sources](#psyker-replenishment-sources)). Other classes are not tracked yet. Shared and Efficiency only apply with Power Overflow or Born Leader, so for every other build they are shown as *not applicable* rather than as 0:
 
 * The summary panel and the Session Stats rows show `-`, and the chat line leaves both values out.
 * Scoreboard shows `-` and Another Scoreboard its own `—`.
@@ -324,6 +324,31 @@ Not counted while at full Toughness (an undercount of `Overflowed`, and therefor
 * Fanatic Rage's 50 % on reaching maximum stacks (a server-only proc; it is only seen when you host, for example in solo play).
 * The self-portion of melee kills that restore Toughness to the ally the enemy was targeting (a server-only proc).
 
+## Psyker replenishment sources
+
+The Psyker has no Toughness-sharing talent either, so only the mission statistics are tracked, the same way as for the [Zealot](#zealot-replenishment-sources): everything below full is read from your Toughness bar, and what the bar cannot show is reconstructed. All amounts are % of maximum Toughness and scale with Toughness-replenish stat buffs (Empyric Resolve's −30 %, Warp Ghost's +25 %, curios) unless noted. Values are taken from the game's own settings.
+
+| Source | Mechanics | How the overflow is tracked |
+| --- | --- | --- |
+| Melee Kill | 5 % per melee kill. | Local attack reports. |
+| Soulstealer | 7.5 % per kill with a warp attack: force staff attacks, Smite, Assail, Brain Rupture, Soulblaze, electrocution and the force swords' warp attacks. | Local attack reports. A kill counts as a warp kill when the game's weapon, projectile and explosion templates pair its damage profile with a warp damage type. |
+| Warp Expenditure, per hit | 2.5 % on the first enemy each melee attack hits, unless that hit is a weakspot kill. | Local attack reports; melee hits within 0.2 s of an attack's first hit belong to that attack. |
+| Warp Expenditure, weakspot kills | 15 % over 3 s after a melee weakspot kill. | The talent's own client-side replenish request. |
+| Quietude | 0.4 % per 1 % of Peril generated, and as much per 1 % quelled (venting, passive quelling, Scrier's Gaze's quell). | Your own Peril, followed every frame. |
+| Mettle | 10 % over 4 s after a critical hit. | The talent's own client-side replenish request. |
+| Souldrinker | 15 % over 5 s after a Soulblaze kill. | The talent's own client-side replenish request. |
+| Scrier's Gaze | 2.5 %/s while active. | The ability's own client-side replenish request. |
+| Disrupt Destiny | 25 % over 2.5 s per marked kill. | Its bonus buff, which the server syncs to you, while it runs. |
+| Essence Harvest (Warp Siphon) | 30 % over 5 s (6 %/s) after gaining a Warp Charge, restarted by the next one. | Its buff, which the server syncs to you, while it runs. |
+| Weapon blessings | Fixed-percentage blessings ignore stat buffs. The Force Greatsword's multi-hit blessing restores 12–15 % per proc depending on tier, and does scale with stat buffs. | The proc activation the server reports to you. |
+
+Soulstealer, Warp Expenditure's per-hit restore and Quietude are restores that only the server runs, so they are counted from what triggers them on every machine, also when you host; so are Disrupt Destiny and Essence Harvest, from their buffs. The client-side replenish requests work as described for the Zealot.
+
+Not counted while at full Toughness (an undercount of `Overflowed`, and therefore of `Generated`):
+
+* Telekine Dome's regeneration inside your own dome. It uses the same replenish reason as a teammate's dome, which the mod leaves out as support you receive.
+* Psychic Leeching's 20 % when you use your blitz while Empowered Psionics is active (a server-only proc).
+
 ## Settings
 
 `Power Overflow Meter` group: meter style (Gauge / Text / Both / None), meter title visibility, estimated rate display, rate display mode (Total offered / Per ally), allies-in-Coherency display, allies-missing-Toughness display, inactive-state visibility (Power Overflow only), output tier labels (off by default), rolling average duration, widget position, meter size (25–300 %), and opacity. To hide the live meter while keeping all statistics, set `Meter style` to `None`: tracking, the mission summary, the end-of-mission chat line, and the scoreboard rows keep working. Disabling the mod through the standard mod toggle stops tracking as well.
@@ -358,6 +383,7 @@ Power Overflow and Born Leader are processed by the server, and multiplayer clie
 * *(Born Leader)* The continuous regeneration counted while at full Toughness is modelled from talent selection and timers rather than read from the server's buffs, so its active windows are approximations. In particular, Catch a Breath's cooldown is restarted from melee hits that land on you; **blocking** an attack also restarts it in game but is not observable client-side, so the meter can credit a little regeneration that the server did not grant.
 * *(Born Leader)* Field Improvisation's 1 %/s near a deployed Medi-Pack is not counted while at full Toughness (no reliable client-side proximity signal), and Duty and Honour's +75 bonus Toughness is excluded by design because it raises maximum Toughness rather than replenishing it.
 * *(Zealot)* The at-full gaps listed under [Zealot replenishment sources](#zealot-replenishment-sources) are not counted. Like the other classes, replenishment the server blocks (while knocked down, or standing in fire or toxic gas) can still be credited from the client-side signals.
+* *(Psyker)* Attack reports carry neither the damage type nor which enemy an attack hit first, so Soulstealer's warp kills are recognised from the damage profile, and Warp Expenditure's per-hit restore from the time between melee hits. Quietude follows your client's own Peril, so a Peril correction from the server can add a little. The at-full gaps listed under [Psyker replenishment sources](#psyker-replenishment-sources) are not counted.
 
 ### Mission summary
 

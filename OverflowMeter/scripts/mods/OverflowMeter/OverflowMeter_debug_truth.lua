@@ -13,7 +13,8 @@
 -- The pulse modules label what they count with the game's replenish reason (`record_mod`), so the
 -- breakdown sets each source's requested and overflowed amounts against the game's. Sources the
 -- game restores without a reason (`<nil>`) are labelled by the mod and summed onto `<nil>`
--- (`MOD_TAG_REASONS`). Only the Zealot module labels its sources so far.
+-- (`MOD_TAG_REASONS`), as are labels the mod splits off a reason. Only the Zealot and Psyker
+-- modules label their sources so far.
 --
 -- It also records, for every restore the server applied before the mod saw it (kills, procs, the
 -- lunge), whether the replicated bar already showed it, and the overflow the old headroom read
@@ -26,8 +27,9 @@
 -- what those earlier restores took up subtracted from the bar. Only measured, not counted.
 --
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
--- Remove before release, together with its load line, its three calls there and the `record_mod`
--- calls in `OverflowMeter_pulses_zealot.lua` and the HUD element.
+-- Remove before release, together with its load line, its three calls there, the `record_mod`
+-- calls in `OverflowMeter_pulses_zealot.lua`, `OverflowMeter_pulses_psyker.lua` and the HUD
+-- element, and the warp profile line in `OverflowMeter_sources_psyker.lua`.
 -- module: OverflowMeter_debug_truth
 -- alias: Truth
 -- author: LucLeto
@@ -54,11 +56,14 @@ local ALLY_REASONS = {
     pinning_dog_kills_buff_allies = true
 }
 
---- Mod labels for sources the game restores without a reason, and the game reason they sum onto.
--- `continuous_model` is the modelled at-full regeneration, for the Zealot the elite-kill window.
+--- Mod labels for sources the game restores without a reason, or under a reason it shares with
+-- another source, and the game reason they sum onto. `continuous_model` is the modelled at-full
+-- regeneration: the Zealot's elite-kill window, the Psyker's Disrupt Destiny. `psyker_melee_hit`
+-- is Warp Expenditure's per-hit restore, which shares its reason with the talent's regeneration.
 local MOD_TAG_REASONS = {
     blessing = "<nil>",
-    continuous_model = "<nil>"
+    continuous_model = "<nil>",
+    psyker_melee_hit = "psyker_melee_toughness"
 }
 
 local Truth = {}
