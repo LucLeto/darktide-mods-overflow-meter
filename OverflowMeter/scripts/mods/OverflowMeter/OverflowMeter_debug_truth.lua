@@ -20,6 +20,11 @@
 -- (the current bar) and the new one (`record_headroom`) gave. That part works on a client too, so
 -- multiplayer missions show how often the bar is ahead of the event.
 --
+-- On a client several such restores can arrive before the bar shows the first one (a sweep that
+-- kills three), and each then finds the same missing Toughness. A restore is `stacked` when the
+-- bar has not moved since an earlier restore it did not show yet; `alt` is the overflow with
+-- what those earlier restores took up subtracted from the bar. Only measured, not counted.
+--
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
 -- Remove before release, together with its load line, its three calls there and the `record_mod`
 -- calls in `OverflowMeter_pulses_zealot.lua` and the HUD element.
@@ -30,6 +35,7 @@ local mod = get_mod("OverflowMeter")
 local Stats = mod._stats
 
 local Managers = Managers
+local math_abs = math.abs
 local math_floor = math.floor
 local next = next
 local pairs = pairs
@@ -65,6 +71,11 @@ local mod_sources = {}
 local headroom = {}
 local timer = 0
 local reported = false
+
+--- Missing Toughness at the last restore the server applied before the mod saw it, and what the
+-- restores since the bar last moved took up without the bar showing it yet.
+local last_damage = nil
+local unshown = 0
 
 --- Below this many Toughness points the bar counts as full, and a change as none.
 local EPSILON = 0.5
@@ -171,7 +182,9 @@ end
 
 --- Adds how the bar looked when a restore the server already applied reached the mod.
 -- `full` when the bar was full at the last sample and still is, `refilled` when it already rose
--- by at least half of what the restore could fill, `pending` otherwise.
+-- by at least half of what the restore could fill, `pending` otherwise. `stacked` and the `alt`
+-- overflow measure restores that arrive before the bar shows an earlier one: the bar has not moved
+-- since that restore, is not full and was not ahead of the last sample for either.
 -- ?string: source label of the source
 -- number: wanted wanted restore in Toughness points
 -- number: damage missing Toughness when the restore arrived
@@ -188,8 +201,10 @@ Truth.record_headroom = function (source, wanted, damage, sample_damage, old_exc
             full = 0,
             refilled = 0,
             pending = 0,
+            stacked = 0,
             old_overflowed = 0,
-            new_overflowed = 0
+            new_overflowed = 0,
+            alt_overflowed = 0
         }
         headroom[key] = entry
     end
@@ -204,9 +219,35 @@ Truth.record_headroom = function (source, wanted, damage, sample_damage, old_exc
         entry.pending = entry.pending + 1
     end
 
+    -- The new read is below the old one only when the bar is ahead of the last sample, so it
+    -- already shows this restore and the earlier ones.
+    local ahead = new_excess < old_excess
+
+    if not last_damage or math_abs(damage - last_damage) >= EPSILON then
+        unshown = 0
+    end
+
+    local alt_excess = new_excess
+
+    if not ahead and unshown > 0 and damage >= EPSILON then
+        local alt_headroom = damage - unshown
+
+        alt_excess = wanted - (alt_headroom > 0 and alt_headroom or 0)
+        entry.stacked = entry.stacked + 1
+    end
+
+    if ahead then
+        unshown = 0
+    else
+        unshown = unshown + wanted - (alt_excess > 0 and alt_excess or 0)
+    end
+
+    last_damage = damage
+
     entry.events = entry.events + 1
     entry.old_overflowed = entry.old_overflowed + (old_excess > 0 and old_excess or 0)
     entry.new_overflowed = entry.new_overflowed + (new_excess > 0 and new_excess or 0)
+    entry.alt_overflowed = entry.alt_overflowed + (alt_excess > 0 and alt_excess or 0)
 end
 
 --- Returns the mod's sums for a game reason, over every label that maps onto it.
@@ -244,6 +285,8 @@ Truth.reset = function ()
 
     timer = 0
     reported = false
+    last_damage = nil
+    unshown = 0
 end
 
 --- Logs the running totals once a minute while anything was recorded.
@@ -264,11 +307,22 @@ Truth.update = function (dt)
     mod:info("%s", _totals_line("running"))
 end
 
---- Logs the bar state per source for the restores the server applied before the mod saw them.
+--- Logs the bar state per source for the restores the server applied before the mod saw them,
+-- and their sum.
 local function _report_headroom()
+    local events, stacked, old_overflowed, new_overflowed, alt_overflowed = 0, 0, 0, 0, 0
+
     for key, entry in pairs(headroom) do
-        mod:info("[OFM] headroom source=%s events=%d full=%d refilled=%d pending=%d overflowed old=%.1f new=%.1f", key, entry.events, entry.full, entry.refilled, entry.pending, entry.old_overflowed, entry.new_overflowed)
+        mod:info("[OFM] headroom source=%s events=%d full=%d refilled=%d pending=%d stacked=%d overflowed old=%.1f new=%.1f alt=%.1f", key, entry.events, entry.full, entry.refilled, entry.pending, entry.stacked, entry.old_overflowed, entry.new_overflowed, entry.alt_overflowed)
+
+        events = events + entry.events
+        stacked = stacked + entry.stacked
+        old_overflowed = old_overflowed + entry.old_overflowed
+        new_overflowed = new_overflowed + entry.new_overflowed
+        alt_overflowed = alt_overflowed + entry.alt_overflowed
     end
+
+    mod:info("[OFM] headroom all events=%d stacked=%d overflowed old=%.1f new=%.1f alt=%.1f", events, stacked, old_overflowed, new_overflowed, alt_overflowed)
 end
 
 --- Logs the bar states, and when hosting the per-reason breakdown and the totals with a comparison
