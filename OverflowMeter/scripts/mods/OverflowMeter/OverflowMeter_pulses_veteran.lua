@@ -94,13 +94,16 @@ local function _has_special_rule(talent_extension, rule_name)
     return talent_extension:has_special_rule(rule_name) and true or false
 end
 
---- Enables the module for the local player's unit, caches its extensions and talent flags and
--- restarts every timer.
+--- Enables the module for the local player's unit and caches its extensions and talent flags.
+-- The HUD element calls it again every second while supported, so the timers only restart when
+-- the module was disabled or the unit changed; `disable` clears them when the context ends.
 -- param: unit local player unit
 -- tab: buff_extension its buff extension
 -- tab: toughness_extension its toughness extension
 -- ?tab: talent_extension its talent extension
 Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_extension)
+    local same_unit = Pulses.enabled and Pulses.unit == unit
+
     Pulses.enabled = true
     Pulses.unit = unit
     Pulses.buff_extension = buff_extension
@@ -119,13 +122,16 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.has_stance_refresh = _has_special_rule(talent_extension, Sources.stance_refresh_rule)
     Pulses.has_on_your_toes = _has_special_rule(talent_extension, Sources.on_your_toes_talent_rule)
     Pulses.has_target_down = _has_special_rule(talent_extension, Sources.target_down_talent_rule)
-    Pulses.stance_active_until = 0
-    Pulses.catch_a_breath_last_hit_t = 0
-    Pulses.confirmed_kill_regen_until = 0
-    Pulses.last_ranged_wield_t = 0
-    Pulses.last_melee_wield_t = 0
-    Pulses.focus_target_unit = nil
-    Pulses.focus_target_until = 0
+
+    if not same_unit then
+        Pulses.stance_active_until = 0
+        Pulses.catch_a_breath_last_hit_t = 0
+        Pulses.confirmed_kill_regen_until = 0
+        Pulses.last_ranged_wield_t = 0
+        Pulses.last_melee_wield_t = 0
+        Pulses.focus_target_unit = nil
+        Pulses.focus_target_until = 0
+    end
 end
 
 --- Disables the module and clears every queue, cached reference, talent flag and timer.
