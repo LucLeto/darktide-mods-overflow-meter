@@ -78,14 +78,21 @@ local ESSENCE_HARVEST_BUFF_NAME = "psyker_souls_replenish_toughness_stacking_buf
 
 --- Replenish reasons of the Psyker buffs whose `update_func` also runs on the client: Mettle and
 -- Souldrinker (`psyker_crits_regen_toughness_movement_speed`, shared by both), Scrier's Gaze
--- (`overcharge_stance`) and Warp Expenditure's weakspot-kill regeneration
--- (`psyker_melee_toughness`). Calls without a reason are never captured, because the weapon
--- blessings and Disrupt Destiny use none and are counted by other means.
+-- (`overcharge_stance`), Warp Expenditure's weakspot-kill regeneration (`psyker_melee_toughness`)
+-- and the Telekine Dome's (`psyker_sphere`, counted only in the Psyker's own dome). Calls without
+-- a reason are never captured, because the weapon blessings and Disrupt Destiny use none and are
+-- counted by other means.
 local REPLENISH_CAPTURE_REASONS = {
     psyker_crits_regen_toughness_movement_speed = true,
     overcharge_stance = true,
-    psyker_melee_toughness = true
+    psyker_melee_toughness = true,
+    psyker_sphere = true
 }
+
+--- The Telekine Dome's reason and the buff it gives everyone inside, which names the Psyker who
+-- cast the dome as its owner.
+local SPHERE_CAPTURE_REASON = "psyker_sphere"
+local SPHERE_BUFF_NAME = "psyker_boost_allies_in_sphere_buff"
 
 --- Warp Expenditure's per-hit restore shares the regeneration's reason but runs only on the
 -- server, so the hook skips calls of exactly this fraction when hosting and the attack reports
@@ -328,5 +335,7 @@ return {
     essence_harvest_buff_name = ESSENCE_HARVEST_BUFF_NAME,
     essence_harvest_regen_rate = essence_harvest_rate,
 
-    replenish_capture_reasons = REPLENISH_CAPTURE_REASONS
+    replenish_capture_reasons = REPLENISH_CAPTURE_REASONS,
+    sphere_capture_reason = SPHERE_CAPTURE_REASON,
+    sphere_buff_name = SPHERE_BUFF_NAME
 }

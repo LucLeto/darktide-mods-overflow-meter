@@ -4,7 +4,8 @@
 -- kills in local attack reports (melee kills and heavy-attack kills), weapon blessing and dodge
 -- procs, Chastise the Wicked's dash, and the Zealot buffs whose replenish also runs on the client
 -- (Shroudfield, the in-melee regeneration, Momentum and Fanatic Rage at maximum stacks). It also
--- models the elite-kill regeneration window, because its replenish carries no reason to capture.
+-- models the elite-kill regeneration while its buff runs, because its replenish carries no reason
+-- to capture. Restores the game refuses (knocked down, standing in fire or gas) are not counted.
 --
 -- The HUD element drains `pending_excess`, the clamped excess of every restore in Toughness
 -- points, each sample. The Zealot shares nothing, so the burst queues of the sharing archetypes
@@ -33,6 +34,7 @@ local mod = get_mod("OverflowMeter")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
 local LungeTemplates = require("scripts/settings/lunge/lunge_templates")
 local Sources = mod._sources_zealot
+local Blocked = mod._blocked_replenish
 
 local ScriptUnit = ScriptUnit
 local Managers = Managers
@@ -53,10 +55,10 @@ local SOURCE_BLESSING = "blessing"
 local NEVER = -math.huge
 
 --- Pulse state.
--- Besides the queue and the local Zealot's unit, extensions and talent flags, it holds the missing
--- Toughness at the last sample and how much of it the restores since then took up, and the
--- modelled timers: when the elite-kill regeneration ends and the last counted Shroudfield restore
--- and Chastise dash.
+-- Besides the queue and the local Zealot's unit, extensions, the components that tell whether a
+-- replenish is refused, and the talent flag, it holds the missing Toughness at the last sample and
+-- how much of it the restores since then took up, and when the last counted Shroudfield restore
+-- and Chastise dash happened.
 local Pulses = {
     enabled = false,
     pending_excess = 0,
@@ -66,10 +68,9 @@ local Pulses = {
     buff_extension = nil,
     toughness_extension = nil,
     unit_data_extension = nil,
-    disabled_component = nil,
+    character_state_component = nil,
+    assisted_state_input_component = nil,
     has_heavy_kill_talent = false,
-    has_elite_kill_talent = false,
-    elite_regen_until = 0,
     last_stealth_t = NEVER,
     last_lunge_t = NEVER
 }
@@ -92,9 +93,9 @@ local function _has_talent_buff(talent_extension, buff_template_name)
     return tier ~= nil and tier ~= 0
 end
 
---- Enables the module for the local player's unit and caches its extensions and talent flags.
--- The HUD element calls it again every second while supported, so the timers only restart when
--- the module was disabled or the unit changed.
+--- Enables the module for the local player's unit and caches its extensions, components and
+-- talent flag. The HUD element calls it again every second while supported, so the timers only
+-- restart when the module was disabled or the unit changed.
 -- param: unit local player unit
 -- tab: buff_extension its buff extension
 -- tab: toughness_extension its toughness extension
@@ -108,22 +109,22 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.toughness_extension = toughness_extension
 
     local unit_data_extension = ScriptUnit.has_extension(unit, "unit_data_system")
+    local can_read = unit_data_extension and unit_data_extension.read_component
 
     Pulses.unit_data_extension = unit_data_extension
-    Pulses.disabled_component = unit_data_extension and unit_data_extension.read_component and unit_data_extension:read_component("disabled_character_state")
+    Pulses.character_state_component = can_read and unit_data_extension:read_component("character_state")
+    Pulses.assisted_state_input_component = can_read and unit_data_extension:read_component("assisted_state_input")
     Pulses.has_heavy_kill_talent = _has_talent_buff(talent_extension, Sources.heavy_kill_talent_buff_name)
-    Pulses.has_elite_kill_talent = _has_talent_buff(talent_extension, Sources.elite_kill_talent_buff_name)
 
     if not same_unit then
         Pulses.sample_damage = toughness_extension:toughness_damage()
         Pulses.used_headroom = 0
-        Pulses.elite_regen_until = 0
         Pulses.last_stealth_t = NEVER
         Pulses.last_lunge_t = NEVER
     end
 end
 
---- Disables the module and clears the queue, every cached reference, talent flag and timer.
+--- Disables the module and clears the queue, every cached reference, the talent flag and the timers.
 Pulses.disable = function()
     Pulses.enabled = false
     Pulses.pending_excess = 0
@@ -133,10 +134,9 @@ Pulses.disable = function()
     Pulses.buff_extension = nil
     Pulses.toughness_extension = nil
     Pulses.unit_data_extension = nil
-    Pulses.disabled_component = nil
+    Pulses.character_state_component = nil
+    Pulses.assisted_state_input_component = nil
     Pulses.has_heavy_kill_talent = false
-    Pulses.has_elite_kill_talent = false
-    Pulses.elite_regen_until = 0
     Pulses.last_stealth_t = NEVER
     Pulses.last_lunge_t = NEVER
 end
@@ -172,16 +172,23 @@ end
 -- Pulse recording
 -- ----------------------------------------------------------------------------
 
+--- Returns whether the game would refuse a replenish for the Zealot right now.
+-- ?string: reason replenish reason; nil or a label of the mod's own for a restore without one
+-- treturn: bool
+local function _is_blocked(reason)
+    return Blocked.is_blocked(Pulses.character_state_component, Pulses.assisted_state_input_component, Pulses.buff_extension, reason)
+end
+
 --- Adds the part of a wanted restore that exceeds the missing Toughness to the excess queue.
--- A restore seen before the game applies it uses the current missing Toughness. One seen after
--- the server applied it uses the larger of the current missing Toughness and the missing Toughness
--- at the last sample less what the restores since then took up, because the bar may already show
--- this restore.
+-- Nothing is added while the game would refuse the restore. A restore seen before the game
+-- applies it uses the current missing Toughness. One seen after the server applied it uses the
+-- larger of the current missing Toughness and the missing Toughness at the last sample less what
+-- the restores since then took up, because the bar may already show this restore.
 -- ?number: wanted wanted restore in Toughness points; ignored unless positive
--- string: source label of the source
+-- string: source label of the source, which is the game's replenish reason where there is one
 -- ?bool: before_applied true when the restore is seen before the game applies it
 local function _accumulate_wanted(wanted, source, before_applied)
-    if not wanted or wanted <= 0 then
+    if not wanted or wanted <= 0 or _is_blocked(source) then
         return
     end
 
@@ -302,26 +309,20 @@ local function _is_resimulating()
     return unit_data_extension and unit_data_extension.is_resimulating or false
 end
 
---- Returns whether the Zealot is disabled (for example netted or pounced), which pauses the
--- modelled regeneration as it does in game.
--- treturn: bool
-local function _is_disabled()
-    local component = Pulses.disabled_component
-
-    return component and component.is_disabled or false
-end
-
---- Returns the rate of the continuous sources currently modelled as running.
--- Only the elite-kill regeneration is modelled: it runs for its duration after an Elite kill and
--- is refreshed by the next one. The HUD element uses it only at full Toughness, where the bar
+--- Returns the rate of the continuous sources currently running.
+-- Only the elite-kill regeneration is modelled, from its buff: an Elite kill adds or refreshes it,
+-- the server syncs it to the client, and its update function restores while it runs, unless the
+-- game refuses the replenish. The HUD element uses the rate only at full Toughness, where the bar
 -- cannot show it.
 -- treturn: number fraction of maximum Toughness per second, before stat buffs
 Pulses.active_continuous_fraction = function()
-    if not Pulses.enabled or not Pulses.has_elite_kill_talent or _is_disabled() then
+    local buff_extension = Pulses.buff_extension
+
+    if not Pulses.enabled or not buff_extension or not buff_extension.current_stacks then
         return 0
     end
 
-    if _now() < Pulses.elite_regen_until then
+    if buff_extension:current_stacks(Sources.elite_kill_regen_buff_name) > 0 and not _is_blocked(nil) then
         return Sources.elite_kill_regen_rate
     end
 
@@ -399,9 +400,8 @@ Pulses.on_proc_active = function(buff_extension, index)
 end
 
 --- Records what one of the Zealot's own kills restores.
--- Melee kills add the base melee restore, heavy-attack kills the heavy-kill talent's restore, and
--- Elite kills open the elite-kill regeneration window. The arguments are those of
--- `AttackReportManager.add_attack_result`.
+-- Melee kills add the base melee restore and heavy-attack kills the heavy-kill talent's restore.
+-- The arguments are those of `AttackReportManager.add_attack_result`.
 -- ?tab: damage_profile damage profile of the attack
 -- param: attacked_unit unit that was hit
 -- param: attacking_unit unit that attacked; only the local player's kills count
@@ -418,16 +418,6 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
 
     if Pulses.has_heavy_kill_talent and damage_profile and damage_profile.melee_attack_strength == MELEE_ATTACK_STRENGTH_HEAVY then
         _add_pulse(Sources.heavy_kill_fraction, true, SOURCE_HEAVY_KILL)
-    end
-
-    if Pulses.has_elite_kill_talent and attacked_unit then
-        local unit_data_extension = ScriptUnit.has_extension(attacked_unit, "unit_data_system")
-        local breed = unit_data_extension and unit_data_extension.breed and unit_data_extension:breed()
-        local tags = breed and breed.tags
-
-        if tags and tags.elite then
-            Pulses.elite_regen_until = _now() + Sources.elite_kill_regen_duration
-        end
     end
 end
 

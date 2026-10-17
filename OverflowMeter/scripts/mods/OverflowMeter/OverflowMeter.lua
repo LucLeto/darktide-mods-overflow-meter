@@ -4,13 +4,13 @@
 --
 -- Every setting is cached in `mod._settings` and refreshed per changed id. The modules are
 -- loaded in dependency order through `mod:io_dofile` and stored on `mod`: the mission
--- statistics, the Skitarii, Veteran, Zealot and Psyker sources and pulses, the scoreboard
--- snapshot with its optional adapters, mission summary sharing and the Session Stats rows. The
--- HUD element (`ui/OverflowMeter_hud_element.lua`) is registered last and reaches everything
--- through these `mod` fields.
+-- statistics, the Skitarii, Veteran, Zealot and Psyker sources and pulses with the check for
+-- refused replenishes, the scoreboard snapshot with its optional adapters, mission summary
+-- sharing and the Session Stats rows. The HUD element (`ui/OverflowMeter_hud_element.lua`) is
+-- registered last and reaches everything through these `mod` fields.
 --
 -- DMF keeps only one hook per mod and method, so the hooks several pulse modules need
--- (`PlayerUnitBuffExtension._set_proc_active_start_time`,
+-- (`PlayerUnitBuffExtension._set_proc_active_start_time`, `PlayerUnitBuffExtension.add_proc_event`,
 -- `AttackReportManager.add_attack_result` and `Toughness.replenish_percentage`) are registered
 -- here once and dispatched to the pulse module the HUD element enabled, `mod._active_pulses`.
 -- module: OverflowMeter
@@ -192,6 +192,7 @@ mod._sources = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowM
 mod._pulses = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses")
 mod._sources_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_veteran")
 mod._pulses_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_veteran")
+mod._blocked_replenish = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_blocked_replenish")
 mod._sources_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_zealot")
 mod._pulses_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_zealot")
 mod._sources_psyker = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_psyker")
@@ -254,6 +255,23 @@ mod:hook_safe(CLASS.PlayerUnitBuffExtension, "_set_proc_active_start_time", func
     end
 
     pulses.on_proc_active(self, index)
+end)
+
+-- A buff event was queued for a player's buff extension (hits, kills, Peril changes and more). The
+-- game runs only predicted buffs on a client, but queues the events there too. Dispatched to the
+-- enabled pulse module when it follows such events, which checks the buff extension itself.
+mod:hook_safe(CLASS.PlayerUnitBuffExtension, "add_proc_event", function (self, event, params)
+    local pulses = mod._active_pulses
+
+    if not pulses or not pulses.enabled then
+        return
+    end
+
+    local on_proc_event = pulses.on_proc_event
+
+    if on_proc_event then
+        on_proc_event(self, event, params)
+    end
 end)
 
 -- A local attack report (a hit, a kill, or the local player being hit). Dispatched to the

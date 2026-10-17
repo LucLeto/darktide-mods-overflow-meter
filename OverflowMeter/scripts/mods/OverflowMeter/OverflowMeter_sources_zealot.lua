@@ -35,7 +35,10 @@ local elite_kill_regen_duration = elite_kills_settings and elite_kills_settings.
 
 --- Talent buff templates; a buff template tier above 0 means the build has the talent.
 local HEAVY_KILL_BUFF_NAME = "zealot_toughness_on_heavy_kills"
-local ELITE_KILLS_BUFF_NAME = "zealot_elite_kills_empowers"
+
+--- The elite-kill regeneration's own buff, which an Elite kill adds or refreshes and the server
+-- syncs to the client; its update function restores while it runs.
+local ELITE_KILL_REGEN_BUFF_NAME = "zealot_elite_kills_empowers_effect"
 
 --- Talent proc buffs whose activation the server reports to the client (they have a cooldown),
 -- mapped to the replenish reason their restore uses. The restored fraction is the template's
@@ -150,9 +153,8 @@ return {
     heavy_kill_fraction = 0.1,
     heavy_kill_talent_buff_name = HEAVY_KILL_BUFF_NAME,
 
-    elite_kill_talent_buff_name = ELITE_KILLS_BUFF_NAME,
+    elite_kill_regen_buff_name = ELITE_KILL_REGEN_BUFF_NAME,
     elite_kill_regen_rate = elite_kill_regen_total / elite_kill_regen_duration,
-    elite_kill_regen_duration = elite_kill_regen_duration,
 
     replenish_capture_reasons = REPLENISH_CAPTURE_REASONS,
     stealth_capture_reason = STEALTH_CAPTURE_REASON,

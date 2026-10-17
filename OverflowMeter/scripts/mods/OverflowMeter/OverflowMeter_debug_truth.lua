@@ -60,11 +60,22 @@ local ALLY_REASONS = {
 -- another source, and the game reason they sum onto. `continuous_model` is the modelled at-full
 -- regeneration: the Zealot's elite-kill window, the Psyker's Disrupt Destiny. `psyker_melee_hit`
 -- is Warp Expenditure's per-hit restore, which shares its reason with the talent's regeneration.
+-- The two residual labels are Quietude's Peril changes no report covered. `psyker_sphere` is the
+-- Psyker's own dome, which the game's side keeps apart from a teammate's (`OWN_DOME_REASON`).
 local MOD_TAG_REASONS = {
     blessing = "<nil>",
     continuous_model = "<nil>",
-    psyker_melee_hit = "psyker_melee_toughness"
+    psyker_melee_hit = "psyker_melee_toughness",
+    warp_generation_residual = "toughness_on_warp_generation",
+    vent_residual = "toughness_on_vent",
+    psyker_sphere = "psyker_sphere_own"
 }
+
+--- The Telekine Dome's reason, the buff it gives everyone inside, and the key the game's restores
+-- inside the local Psyker's own dome are summed under (not ally support).
+local DOME_REASON = "psyker_sphere"
+local DOME_BUFF_NAME = "psyker_boost_allies_in_sphere_buff"
+local OWN_DOME_REASON = "psyker_sphere_own"
 
 local Truth = {}
 
@@ -101,6 +112,15 @@ mod:hook_safe("PlayerUnitToughnessExtension", "_handle_procs", function (self, a
     end
 
     local key = reason or "<nil>"
+
+    if reason == DOME_REASON then
+        local buff_extension = self._buff_extension
+
+        if buff_extension and buff_extension.has_buff_using_buff_template_with_owner and buff_extension:has_buff_using_buff_template_with_owner(DOME_BUFF_NAME, self._unit) then
+            key = OWN_DOME_REASON
+        end
+    end
+
     local entry = reasons[key]
 
     if not entry then

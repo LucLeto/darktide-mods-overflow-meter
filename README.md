@@ -308,7 +308,7 @@ The Zealot has no Toughness-sharing talent, so there is no live meter; only the 
 | Chastise the Wicked | The dash replenishes 50 % when it starts; ignores stat buffs. | Your own lunging state. |
 | Heavy-attack kills (`zealot_toughness_on_heavy_kills`) | 10 % per kill with a heavy attack. | Local attack reports. |
 | Dodge restore (`zealot_toughness_on_dodge`) | 15 % per successful dodge (0.5 s cooldown). | The proc activation the server reports to you. |
-| Elite-kill regeneration (`zealot_elite_kills_empowers`) | 15 % over 5 s (3 %/s) after an Elite kill, refreshed by the next one. | Modelled from the kill; paused while disabled. |
+| Elite-kill regeneration (`zealot_elite_kills_empowers`) | 15 % over 5 s (3 %/s) after an Elite kill, refreshed by the next one. | Its buff, which the server syncs to you, while it runs. |
 | Shroudfield restore | 50 % when Shroudfield starts. | The talent's own client-side replenish request. |
 | In-melee regeneration (`zealot_toughness_in_melee`) | 2.5 % per second plus 1 % per additional enemy within 5 m, up to 7.5 %/s. | The talent's own client-side replenish request. |
 | Momentum (Inexorable Judgement) | 0.5 %/s per Momentum stack while its bonus is active. | The talent's own client-side replenish request. |
@@ -316,6 +316,8 @@ The Zealot has no Toughness-sharing talent, so there is no live meter; only the 
 | Weapon blessings | Fixed-percentage blessings, including the Flamer's continuous-fire restore; ignore stat buffs. The multi-hit blessings of the Heavy Eviscerator and the Thunder Hammer restore 12–15 % per proc depending on tier, and do scale with stat buffs. | The proc activation the server reports to you. |
 
 **How the client-side replenish requests work.** Several Zealot buffs run their update functions on your own client too, and ask the game to replenish your Toughness there. On a client that request does nothing, because the server owns your Toughness, but the mod can see it. That makes it an exact feed for these sources at full Toughness. Only a fixed list of reasons for your own character is counted, so nothing is double-counted against the other paths.
+
+**Refused replenishes.** The game restores nothing while you are knocked down (unless you are being force-assisted), and nothing but ability restores while you stand in fire or gas. The mod applies the same rules to every source above, so procs and kills in those moments are not counted either.
 
 Not counted while at full Toughness (an undercount of `Overflowed`, and therefore of `Generated`):
 
@@ -334,19 +336,19 @@ The Psyker has no Toughness-sharing talent either, so only the mission statistic
 | Soulstealer | 7.5 % per kill with a warp attack: force staff attacks, Smite, Assail, Brain Rupture, Soulblaze, electrocution and the force swords' warp attacks. | Local attack reports. A kill counts as a warp kill when the game's weapon, projectile and explosion templates pair its damage profile with a warp damage type. |
 | Warp Expenditure, per hit | 2.5 % on the first enemy each melee attack hits, unless that hit is a weakspot kill. | Local attack reports; melee hits within 0.2 s of an attack's first hit belong to that attack. |
 | Warp Expenditure, weakspot kills | 15 % over 3 s after a melee weakspot kill. | The talent's own client-side replenish request. |
-| Quietude | 0.4 % per 1 % of Peril generated, and as much per 1 % quelled (venting, passive quelling, Scrier's Gaze's quell). | Your own Peril, followed every frame. |
+| Quietude | 0.4 % per 1 % of Peril generated, and as much per 1 % quelled (venting, passive quelling, Scrier's Gaze's quell). | The game's own reports of each Peril change, which reach your client too; a change they did not cover is taken from your Peril each frame. |
 | Mettle | 10 % over 4 s after a critical hit. | The talent's own client-side replenish request. |
 | Souldrinker | 15 % over 5 s after a Soulblaze kill. | The talent's own client-side replenish request. |
 | Scrier's Gaze | 2.5 %/s while active. | The ability's own client-side replenish request. |
+| Telekine Dome (Sanctuary) | 10 %/s inside your own dome. | The dome's own client-side replenish request, while the dome you stand in is yours. |
 | Disrupt Destiny | 25 % over 2.5 s per marked kill. | Its bonus buff, which the server syncs to you, while it runs. |
 | Essence Harvest (Warp Siphon) | 30 % over 5 s (6 %/s) after gaining a Warp Charge, restarted by the next one. | Its buff, which the server syncs to you, while it runs. |
 | Weapon blessings | Fixed-percentage blessings ignore stat buffs. The Force Greatsword's multi-hit blessing restores 12–15 % per proc depending on tier, and does scale with stat buffs. | The proc activation the server reports to you. |
 
-Soulstealer, Warp Expenditure's per-hit restore and Quietude are restores that only the server runs, so they are counted from what triggers them on every machine, also when you host; so are Disrupt Destiny and Essence Harvest, from their buffs. The client-side replenish requests work as described for the Zealot.
+Soulstealer, Warp Expenditure's per-hit restore and Quietude are restores that only the server runs, so they are counted from what triggers them on every machine, also when you host; so are Disrupt Destiny and Essence Harvest, from their buffs. The client-side replenish requests and refused replenishes work as described for the Zealot. A teammate's Telekine Dome is support you receive and stays out of your totals.
 
 Not counted while at full Toughness (an undercount of `Overflowed`, and therefore of `Generated`):
 
-* Telekine Dome's regeneration inside your own dome. It uses the same replenish reason as a teammate's dome, which the mod leaves out as support you receive.
 * Psychic Leeching's 20 % when you use your blitz while Empowered Psionics is active (a server-only proc).
 
 ## Settings
@@ -382,8 +384,9 @@ Power Overflow and Born Leader are processed by the server, and multiplayer clie
 * Kill- and hit-based pulses are inferred from local attack reports and can differ slightly from the server's proc order (for example an explosion hit that kills its target).
 * *(Born Leader)* The continuous regeneration counted while at full Toughness is modelled from talent selection and timers rather than read from the server's buffs, so its active windows are approximations. In particular, Catch a Breath's cooldown is restarted from melee hits that land on you; **blocking** an attack also restarts it in game but is not observable client-side, so the meter can credit a little regeneration that the server did not grant.
 * *(Born Leader)* Field Improvisation's 1 %/s near a deployed Medi-Pack is not counted while at full Toughness (no reliable client-side proximity signal), and Duty and Honour's +75 bonus Toughness is excluded by design because it raises maximum Toughness rather than replenishing it.
-* *(Zealot)* The at-full gaps listed under [Zealot replenishment sources](#zealot-replenishment-sources) are not counted. Like the other classes, replenishment the server blocks (while knocked down, or standing in fire or toxic gas) can still be credited from the client-side signals.
-* *(Psyker)* Attack reports carry neither the damage type nor which enemy an attack hit first, so Soulstealer's warp kills are recognised from the damage profile, and Warp Expenditure's per-hit restore from the time between melee hits. Quietude follows your client's own Peril, so a Peril correction from the server can add a little. The at-full gaps listed under [Psyker replenishment sources](#psyker-replenishment-sources) are not counted.
+* *(Skitarii, Veteran)* Replenishment the server refuses (while knocked down, or standing in fire or toxic gas) can still be credited from the client-side signals.
+* *(Zealot)* The at-full gaps listed under [Zealot replenishment sources](#zealot-replenishment-sources) are not counted.
+* *(Psyker)* Attack reports carry neither the damage type nor which enemy an attack hit first, so Soulstealer's warp kills are recognised from the damage profile, and Warp Expenditure's per-hit restore from the time between melee hits. A Peril correction from the server counts as a Peril change, so it can add a little to Quietude. While your own Telekine Dome overlaps a teammate's, the teammate's ticks are counted too. The at-full gaps listed under [Psyker replenishment sources](#psyker-replenishment-sources) are not counted.
 
 ### Mission summary
 

@@ -3,14 +3,20 @@
 -- cap and everything that lands at full. This module infers that part from client-side signals:
 -- kills and hits in local attack reports (melee kills, Soulstealer's warp kills and Warp
 -- Expenditure's per-hit restore), weapon blessing procs, the Peril changes Quietude converts, and
--- the Psyker buffs whose replenish also runs on the client (Mettle, Souldrinker, Scrier's Gaze and
--- Warp Expenditure's weakspot-kill regeneration). It also models Disrupt Destiny's marked-kill
--- restore and Essence Harvest's regeneration while their buffs run: the first replenish carries
--- no reason to capture, the second runs on the server only.
+-- the Psyker buffs whose replenish also runs on the client (Mettle, Souldrinker, Scrier's Gaze,
+-- Warp Expenditure's weakspot-kill regeneration, and the Telekine Dome's while the dome is the
+-- Psyker's own). It also models Disrupt Destiny's marked-kill restore and Essence Harvest's
+-- regeneration while their buffs run: the first replenish carries no reason to capture, the second
+-- runs on the server only. Restores the game refuses (knocked down, standing in fire or gas) are
+-- not counted.
 --
 -- Soulstealer, Warp Expenditure's per-hit restore and Quietude are proc functions of buffs the
 -- game does not predict, so only the server runs them. They are counted from their triggers on
--- every machine, also when hosting, so solo play checks the same path a client uses.
+-- every machine, also when hosting, so solo play checks the same path a client uses. Quietude
+-- converts every Peril change the game reports to the buff system, and those reports are queued
+-- on the client too, so the module follows them; Peril changes they did not cover (a correction
+-- from the server, or a talent that changes Peril on the server only) are taken from the Peril
+-- itself each frame.
 --
 -- The HUD element drains `pending_excess`, the clamped excess of every restore in Toughness
 -- points, each sample. The Psyker shares nothing, so the burst queues of the sharing archetypes
@@ -23,19 +29,21 @@
 -- last sample is used as well, less what the restores counted since then took up.
 --
 -- After a misprediction the client re-simulates the local unit's last frames, running its buffs
--- again. Replenish requests seen while the unit re-simulates were already counted the first time,
--- so they are ignored.
+-- and Peril again. Replenish requests and Peril reports seen while the unit re-simulates were
+-- already counted the first time, so they are ignored.
 --
 -- Explicit module loaded by `OverflowMeter.lua` and stored as `mod._pulses_psyker`.
--- `on_proc_active`, `on_attack_result` and `on_replenish_percentage` are called from the shared
--- hooks in `OverflowMeter.lua`, `update` every frame by the HUD element. `set_context` enables it
--- for the local player's unit, and it ignores every event while disabled.
+-- `on_proc_active`, `on_proc_event`, `on_attack_result` and `on_replenish_percentage` are called
+-- from the shared hooks in `OverflowMeter.lua`, `update` every frame by the HUD element.
+-- `set_context` enables it for the local player's unit, and it ignores every event while disabled.
 -- module: OverflowMeter_pulses_psyker
 -- alias: Pulses
 -- author: LucLeto
 local mod = get_mod("OverflowMeter")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
+local BuffSettings = require("scripts/settings/buff/buff_settings")
 local Sources = mod._sources_psyker
+local Blocked = mod._blocked_replenish
 
 local ScriptUnit = ScriptUnit
 local Managers = Managers
@@ -44,17 +52,22 @@ local type = type
 
 local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
+local PROC_EVENT_WARP_CHARGE_CHANGED = BuffSettings.proc_events and BuffSettings.proc_events.on_warp_charge_changed or "on_warp_charge_changed"
 local WARP_CHARGE_EXPLODING = "exploding"
+--- Peril change below which the Peril and the reports count as agreeing (rounding only).
+local PERIL_EPSILON = 1e-6
 
 --- Labels of the counted sources: the game's replenish reason where the source has one, which
 -- lets the TEMPORARY solo-play comparison set each source against the game's own figure. Warp
 -- Expenditure's per-hit restore has its own label, so the comparison can tell it from the
--- regeneration that shares its reason.
+-- regeneration that shares its reason, and so do the Peril changes no report covered.
 local SOURCE_MELEE_KILL = "melee_kill"
 local SOURCE_WARP_KILL = "talent_toughness_2"
 local SOURCE_MELEE_HIT = "psyker_melee_hit"
 local SOURCE_WARP_GENERATION = "toughness_on_warp_generation"
 local SOURCE_VENT = "toughness_on_vent"
+local SOURCE_WARP_GENERATION_RESIDUAL = "warp_generation_residual"
+local SOURCE_VENT_RESIDUAL = "vent_residual"
 local SOURCE_BLESSING = "blessing"
 local SOURCE_ESSENCE_HARVEST = "talent_toughness_1"
 local SOURCE_CONTINUOUS_MODEL = "continuous_model"
@@ -62,10 +75,11 @@ local SOURCE_CONTINUOUS_MODEL = "continuous_model"
 local NEVER = -math.huge
 
 --- Pulse state.
--- Besides the queue and the local Psyker's unit, extensions and talent flags, it holds the missing
--- Toughness at the last sample and how much of it the restores since then took up, the Peril seen
--- last frame and whether it was exploding, and when the last melee attack's first hit landed.
--- `continuous_source` labels the modelled regeneration for the TEMPORARY solo-play comparison.
+-- Besides the queue and the local Psyker's unit, extensions, components and talent flags, it
+-- holds the missing Toughness at the last sample and how much of it the restores since then took
+-- up, the Peril seen last frame, whether it was exploding and how much the Peril reports since
+-- then changed it, and when the last melee attack's first hit landed. `continuous_source` labels
+-- the modelled regeneration for the TEMPORARY solo-play comparison.
 local Pulses = {
     enabled = false,
     continuous_source = SOURCE_CONTINUOUS_MODEL,
@@ -77,12 +91,15 @@ local Pulses = {
     toughness_extension = nil,
     unit_data_extension = nil,
     warp_charge_component = nil,
+    character_state_component = nil,
+    assisted_state_input_component = nil,
     has_warp_kill_talent = false,
     has_melee_hit_talent = false,
     has_warp_generation_talent = false,
     has_vent_talent = false,
     last_warp_charge = 0,
     last_warp_charge_exploding = false,
+    reported_warp_change = 0,
     last_melee_attack_t = NEVER
 }
 
@@ -110,9 +127,9 @@ local function _has_talent_buff(talent_extension, buff_extension, buff_template_
     return buff_extension ~= nil and buff_extension.has_buff_using_buff_template ~= nil and buff_extension:has_buff_using_buff_template(buff_template_name)
 end
 
---- Enables the module for the local player's unit and caches its extensions and talent flags.
--- The HUD element calls it again every second while supported, so the Peril and attack trackers
--- only restart when the module was disabled or the unit changed.
+--- Enables the module for the local player's unit and caches its extensions, components and
+-- talent flags. The HUD element calls it again every second while supported, so the Peril and
+-- attack trackers only restart when the module was disabled or the unit changed.
 -- param: unit local player unit
 -- tab: buff_extension its buff extension
 -- tab: toughness_extension its toughness extension
@@ -126,10 +143,13 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.toughness_extension = toughness_extension
 
     local unit_data_extension = ScriptUnit.has_extension(unit, "unit_data_system")
-    local warp_charge_component = unit_data_extension and unit_data_extension.read_component and unit_data_extension:read_component("warp_charge")
+    local can_read = unit_data_extension and unit_data_extension.read_component
+    local warp_charge_component = can_read and unit_data_extension:read_component("warp_charge")
 
     Pulses.unit_data_extension = unit_data_extension
     Pulses.warp_charge_component = warp_charge_component
+    Pulses.character_state_component = can_read and unit_data_extension:read_component("character_state")
+    Pulses.assisted_state_input_component = can_read and unit_data_extension:read_component("assisted_state_input")
     Pulses.has_warp_kill_talent = _has_talent_buff(talent_extension, buff_extension, Sources.warp_kill_talent_buff_name)
     Pulses.has_melee_hit_talent = _has_talent_buff(talent_extension, buff_extension, Sources.melee_hit_talent_buff_name)
     Pulses.has_warp_generation_talent = _has_talent_buff(talent_extension, buff_extension, Sources.warp_generation_talent_buff_name)
@@ -144,6 +164,7 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
         Pulses.used_headroom = 0
         Pulses.last_warp_charge = warp_charge_component and warp_charge_component.current_percentage or 0
         Pulses.last_warp_charge_exploding = false
+        Pulses.reported_warp_change = 0
         Pulses.last_melee_attack_t = NEVER
     end
 end
@@ -160,12 +181,15 @@ Pulses.disable = function()
     Pulses.toughness_extension = nil
     Pulses.unit_data_extension = nil
     Pulses.warp_charge_component = nil
+    Pulses.character_state_component = nil
+    Pulses.assisted_state_input_component = nil
     Pulses.has_warp_kill_talent = false
     Pulses.has_melee_hit_talent = false
     Pulses.has_warp_generation_talent = false
     Pulses.has_vent_talent = false
     Pulses.last_warp_charge = 0
     Pulses.last_warp_charge_exploding = false
+    Pulses.reported_warp_change = 0
     Pulses.last_melee_attack_t = NEVER
 end
 
@@ -200,16 +224,23 @@ end
 -- Pulse recording
 -- ----------------------------------------------------------------------------
 
+--- Returns whether the game would refuse a replenish for the Psyker right now.
+-- ?string: reason replenish reason; nil or a label of the mod's own for a restore without one
+-- treturn: bool
+local function _is_blocked(reason)
+    return Blocked.is_blocked(Pulses.character_state_component, Pulses.assisted_state_input_component, Pulses.buff_extension, reason)
+end
+
 --- Adds the part of a wanted restore that exceeds the missing Toughness to the excess queue.
--- A restore seen before the game applies it uses the current missing Toughness. One seen after
--- the server applied it uses the larger of the current missing Toughness and the missing Toughness
--- at the last sample less what the restores since then took up, because the bar may already show
--- this restore.
+-- Nothing is added while the game would refuse the restore. A restore seen before the game
+-- applies it uses the current missing Toughness. One seen after the server applied it uses the
+-- larger of the current missing Toughness and the missing Toughness at the last sample less what
+-- the restores since then took up, because the bar may already show this restore.
 -- ?number: wanted wanted restore in Toughness points; ignored unless positive
--- string: source label of the source
+-- string: source label of the source, which is the game's replenish reason where there is one
 -- ?bool: before_applied true when the restore is seen before the game applies it
 local function _accumulate_wanted(wanted, source, before_applied)
-    if not wanted or wanted <= 0 then
+    if not wanted or wanted <= 0 or _is_blocked(source) then
         return
     end
 
@@ -334,13 +365,13 @@ end
 -- Two are modelled from their buffs, which the server syncs to the client: Disrupt Destiny, whose
 -- marked kill adds a bonus buff that restores its share every frame for 2.5 s, and Essence
 -- Harvest, whose buff restores every frame for 5 s after a Warp Charge is gained. The two
--- keystones exclude each other. The HUD element uses the rate only at full Toughness, where the
--- bar cannot show it.
+-- keystones exclude each other. Neither restores while the game refuses the replenish. The HUD
+-- element uses the rate only at full Toughness, where the bar cannot show it.
 -- treturn: number fraction of maximum Toughness per second, before stat buffs
 Pulses.active_continuous_fraction = function()
     local buff_extension = Pulses.buff_extension
 
-    if not Pulses.enabled or not buff_extension or not buff_extension.current_stacks then
+    if not Pulses.enabled or not buff_extension or not buff_extension.current_stacks or _is_blocked(nil) then
         return 0
     end
 
@@ -359,12 +390,26 @@ Pulses.active_continuous_fraction = function()
     return fraction
 end
 
---- Follows the Psyker's Peril every frame for Quietude.
--- The talent restores 0.4 % of maximum Toughness per 1 % of Peril generated, and as much per 1 %
--- quelled, whether by venting, passively or at once. The game converts every change of the warp
--- charge as it happens, so the change since last frame is recorded in the same way. Peril cleared
--- after Perils of the Warp is skipped: the game clears it without a buff event. The Peril is
--- followed without the talent too, so a change of talents never counts the gap as one change.
+--- Records a Peril change for Quietude, at the amount and sign the game converts.
+-- ?number: change new Peril less the old, as a fraction
+-- string: generation_source label when the Peril rose
+-- string: vent_source label when it fell
+local function _add_quietude_pulse(change, generation_source, vent_source)
+    if change > 0 then
+        if Pulses.has_warp_generation_talent then
+            _add_pulse(change * Sources.quietude_multiplier, true, generation_source)
+        end
+    elseif change < 0 and Pulses.has_vent_talent then
+        _add_pulse(-change * Sources.quietude_multiplier, true, vent_source)
+    end
+end
+
+--- Follows the Psyker's Peril every frame for the changes no Peril report covered.
+-- The reports counted in `on_proc_event` are subtracted from the change since last frame. What
+-- remains is a correction from the server or a change a talent made on the server only, and it
+-- counts the same way. Peril cleared after Perils of the Warp is skipped: the game clears it
+-- without a report. The Peril is followed without the talent too, so a change of talents never
+-- counts the gap as one change.
 Pulses.update = function()
     local component = Pulses.warp_charge_component
 
@@ -374,17 +419,14 @@ Pulses.update = function()
 
     local current = component.current_percentage or 0
     local was_exploding = Pulses.last_warp_charge_exploding
-    local change = current - Pulses.last_warp_charge
+    local residual = current - Pulses.last_warp_charge - Pulses.reported_warp_change
 
     Pulses.last_warp_charge = current
     Pulses.last_warp_charge_exploding = component.state == WARP_CHARGE_EXPLODING
+    Pulses.reported_warp_change = 0
 
-    if change > 0 then
-        if Pulses.has_warp_generation_talent then
-            _add_pulse(change * Sources.quietude_multiplier, true, SOURCE_WARP_GENERATION)
-        end
-    elseif change < 0 and Pulses.has_vent_talent and not was_exploding then
-        _add_pulse(-change * Sources.quietude_multiplier, true, SOURCE_VENT)
+    if residual > PERIL_EPSILON or (residual < -PERIL_EPSILON and not was_exploding) then
+        _add_quietude_pulse(residual, SOURCE_WARP_GENERATION_RESIDUAL, SOURCE_VENT_RESIDUAL)
     end
 end
 
@@ -447,6 +489,33 @@ Pulses.on_proc_active = function(buff_extension, index)
     _add_pulse(fixed_percentage, false, SOURCE_BLESSING)
 end
 
+--- Records a Peril change the game reported to the local player's buff system, for Quietude.
+-- The report's `percentage_change` is the old Peril less the new, the amount Quietude converts.
+-- Every report is noted for the frame's leftover in `update`; reports while the unit re-simulates
+-- repeat changes counted the first time and restore nothing more.
+-- tab: buff_extension buff extension the event was queued for
+-- string: event proc event name
+-- ?tab: params event parameters
+Pulses.on_proc_event = function(buff_extension, event, params)
+    if not Pulses.enabled or buff_extension ~= Pulses.buff_extension or event ~= PROC_EVENT_WARP_CHARGE_CHANGED then
+        return
+    end
+
+    local percentage_change = params and params.percentage_change
+
+    if type(percentage_change) ~= "number" or percentage_change == 0 then
+        return
+    end
+
+    Pulses.reported_warp_change = Pulses.reported_warp_change - percentage_change
+
+    if _is_resimulating() then
+        return
+    end
+
+    _add_quietude_pulse(-percentage_change, SOURCE_WARP_GENERATION, SOURCE_VENT)
+end
+
 --- Records what one of the Psyker's own hits or kills restores.
 -- Melee kills add the base melee restore and warp kills Soulstealer's. Warp Expenditure restores
 -- on the first target of each melee attack, unless that hit is a weakspot kill, which starts the
@@ -493,10 +562,21 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 end
 
+--- Returns whether the Psyker stands in a Telekine Dome of their own: the dome's buff on the unit
+-- names the Psyker who cast it.
+-- treturn: bool
+local function _in_own_dome()
+    local buff_extension = Pulses.buff_extension
+
+    return buff_extension ~= nil and buff_extension.has_buff_using_buff_template_with_owner ~= nil and buff_extension:has_buff_using_buff_template_with_owner(Sources.sphere_buff_name, Pulses.unit)
+end
+
 --- Records a replenish the game asked for on the local player's unit.
 -- Only the whitelisted Psyker reasons count, and none while the unit re-simulates. When hosting,
 -- Warp Expenditure's per-hit restore also arrives here under the regeneration's reason; it is
--- told apart by its fraction and skipped, because the attack reports count it.
+-- told apart by its fraction and skipped, because the attack reports count it. The Telekine
+-- Dome's regeneration counts only while the dome is the Psyker's own; a teammate's is support
+-- received.
 -- param: unit unit being replenished
 -- ?number: fixed_percentage restore as a fraction of maximum Toughness
 -- ?bool: ignore_stat_buffs true when the restore ignores Toughness stat buffs
@@ -507,6 +587,10 @@ Pulses.on_replenish_percentage = function(unit, fixed_percentage, ignore_stat_bu
     end
 
     if reason == Sources.melee_hit_capture_reason and fixed_percentage == Sources.melee_hit_fraction then
+        return
+    end
+
+    if reason == Sources.sphere_capture_reason and not _in_own_dome() then
         return
     end
 
