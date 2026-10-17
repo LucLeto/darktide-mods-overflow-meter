@@ -13,10 +13,11 @@
 -- The pulse modules label what they count with the game's replenish reason (`record_mod`), so the
 -- breakdown sets each source's requested and overflowed amounts against the game's. Sources the
 -- game restores without a reason (`<nil>`) are labelled by the mod and summed onto `<nil>`
--- (`MOD_TAG_REASONS`), as are labels the mod splits off a reason. The Zealot, Psyker and Skitarii
+-- (`MOD_TAG_REASONS`), as are labels the mod splits off a reason. Every tracked archetype's
 -- modules label their sources. Most Skitarii talents restore under the one reason
--- `cryptic_talent`, so the game's side splits that reason by the buff template that restored,
--- found on the call stack (`SPLIT_REASONS`).
+-- `cryptic_talent`, and Veteran talents share `talent_toughness_1` and `talent_toughness_3`, so the
+-- game's side splits those reasons by the buff template that restored, found on the call stack
+-- (`SPLIT_REASONS`).
 --
 -- It also records, for every restore the server applied before the mod saw it (kills, procs, the
 -- lunge), whether the replicated bar already showed it, and the overflow the old headroom read
@@ -31,8 +32,9 @@
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
 -- Remove before release, together with its load line, its three calls there, the `record_mod`
 -- calls in `OverflowMeter_pulses_zealot.lua`, `OverflowMeter_pulses_psyker.lua`,
--- `OverflowMeter_pulses.lua` and the HUD element, the source labels passed in
--- `OverflowMeter_pulses.lua`, and the warp profile line in `OverflowMeter_sources_psyker.lua`.
+-- `OverflowMeter_pulses.lua`, `OverflowMeter_pulses_veteran.lua` and the HUD element, the source
+-- labels passed in `OverflowMeter_pulses.lua` and `OverflowMeter_pulses_veteran.lua` (with the
+-- latter's `continuous_parts`), and the warp profile line in `OverflowMeter_sources_psyker.lua`.
 -- module: OverflowMeter_debug_truth
 -- alias: Truth
 -- author: LucLeto
@@ -79,10 +81,17 @@ local MOD_TAG_REASONS = {
     discharge_hit = "ability_shout"
 }
 
---- Reasons the game shares between several talents, split by the buff template that restored:
--- the key becomes `reason:template`.
+--- Reasons the game shares between several talents of a class, split by the buff template that
+-- restored: the key becomes `reason:template`. Per archetype, because other classes reuse the
+-- names (`talent_toughness_3` is also the Zealot's in-melee regeneration).
 local SPLIT_REASONS = {
-    cryptic_talent = true
+    cryptic = {
+        cryptic_talent = true
+    },
+    veteran = {
+        talent_toughness_1 = true,
+        talent_toughness_3 = true
+    }
 }
 
 --- Buff templates the mod models together, summed under one key: the Skitarii adapter that
@@ -132,13 +141,29 @@ local unshown = 0
 --- Below this many Toughness points the bar counts as full, and a change as none.
 local EPSILON = 0.5
 
+--- Returns the local player, if any.
+-- treturn: ?tab player
+local function _local_player()
+    local player_manager = Managers.player
+
+    return player_manager and player_manager.local_player_safe and player_manager:local_player_safe(1)
+end
+
 --- Returns the local player's unit, if any.
 -- treturn: ?param unit
 local function _local_unit()
-    local player_manager = Managers.player
-    local player = player_manager and player_manager.local_player_safe and player_manager:local_player_safe(1)
+    local player = _local_player()
 
     return player and player.player_unit
+end
+
+--- Returns the reasons to split for the local player's archetype, if any.
+-- treturn: ?tab set of reasons
+local function _split_reasons()
+    local player = _local_player()
+    local archetype = player and player.archetype_name and player:archetype_name()
+
+    return archetype and SPLIT_REASONS[archetype]
 end
 
 --- Returns the name of the buff template whose function asked for the restore, from the call
@@ -185,8 +210,9 @@ mod:hook_safe("PlayerUnitToughnessExtension", "_handle_procs", function (self, a
     end
 
     local key = reason or "<nil>"
+    local split_reasons = reason and _split_reasons()
 
-    if SPLIT_REASONS[reason] then
+    if split_reasons and split_reasons[reason] then
         local template_name = _restoring_template()
 
         key = reason .. ":" .. (template_name and (TEMPLATE_GROUPS[template_name] or template_name) or "?")

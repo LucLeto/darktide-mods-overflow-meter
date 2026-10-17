@@ -31,6 +31,17 @@ local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local ATTACK_TYPE_RANGED = AttackSettings.attack_types.ranged
 
+--- TEMPORARY: labels of the counted sources for the solo-play comparison, matching the game's
+-- reason, or the reason and the buff template that restored where several talents share one.
+local SOURCE_MELEE_KILL = "melee_kill"
+local SOURCE_OUT_FOR_BLOOD = "talent_toughness_3:veteran_all_kills_replenish_bonus_toughness"
+local SOURCE_EXHILARATING = "talent_toughness_2"
+local SOURCE_CONFIRMED_KILL = "talent_toughness_1:veteran_toughness_on_elite_kill"
+local SOURCE_TARGET_DOWN = "veteran_tag"
+local SOURCE_ON_YOUR_TOES = "veteran_weapon_switch"
+local SOURCE_SHOUT = "ability_stance"
+local SOURCE_BLESSING = "blessing"
+
 --- Pulse state.
 -- Besides the queues and the local Veteran's unit, extensions and talent flags, it holds the
 -- modelled timers: when the stance ends, the last melee hit taken (Catch a Breath), when
@@ -199,7 +210,8 @@ end
 
 --- Adds the part of a wanted restore that exceeds the missing Toughness to the excess queue.
 -- ?number: wanted wanted restore in Toughness points; ignored unless positive
-local function _accumulate_wanted(wanted)
+-- string: source TEMPORARY label of the source
+local function _accumulate_wanted(wanted, source)
     if not wanted or wanted <= 0 then
         return
     end
@@ -216,13 +228,21 @@ local function _accumulate_wanted(wanted)
     if excess > 0 then
         Pulses.pending_excess = Pulses.pending_excess + excess
     end
+
+    -- TEMPORARY: per-source figures for the solo-play comparison.
+    local debug_truth = mod._debug_truth
+
+    if debug_truth then
+        debug_truth.record_mod(source, wanted, excess > 0 and excess or 0)
+    end
 end
 
 --- Records a restore given as a fraction of maximum Toughness.
 -- ?number: fraction restore fraction; ignored unless positive
 -- ?bool: apply_replenish_stat_buffs scale by `toughness_replenish_modifier` and
 -- `toughness_replenish_multiplier`, as the game does for restores that use stat buffs
-local function _add_pulse(fraction, apply_replenish_stat_buffs)
+-- string: source TEMPORARY label of the source
+local function _add_pulse(fraction, apply_replenish_stat_buffs, source)
     if not fraction or fraction <= 0 then
         return
     end
@@ -244,7 +264,7 @@ local function _add_pulse(fraction, apply_replenish_stat_buffs)
         end
     end
 
-    _accumulate_wanted(wanted)
+    _accumulate_wanted(wanted, source)
 end
 
 --- Records the base melee-kill restore, scaled the way the game's toughness template does.
@@ -266,7 +286,7 @@ local function _add_melee_kill_pulse()
     end
 
     if fraction > 0 then
-        _accumulate_wanted(fraction * toughness_extension:max_toughness())
+        _accumulate_wanted(fraction * toughness_extension:max_toughness(), SOURCE_MELEE_KILL)
     end
 end
 
@@ -289,6 +309,13 @@ local function _add_burst()
 
         if excess > 0 then
             Pulses.pending_burst_overflow = Pulses.pending_burst_overflow + excess
+        end
+
+        -- TEMPORARY: the shout for the solo-play comparison.
+        local debug_truth = mod._debug_truth
+
+        if debug_truth then
+            debug_truth.record_mod(SOURCE_SHOUT, max_toughness, excess > 0 and excess or 0)
         end
     end
 end
@@ -324,12 +351,28 @@ local function _stance_duration()
     return Pulses.has_increased_stance_duration and Sources.stance_duration_increased or Sources.stance_duration
 end
 
+--- TEMPORARY: the modelled sources' current rates under their solo-play comparison labels, set by
+-- `active_continuous_fraction` and read by the HUD element. Reused every sample.
+local CONTINUOUS_PART_STANCE = { label = "veteran_ranged_stance", rate = 0 }
+local CONTINUOUS_PART_CATCH_A_BREATH = { label = "talent_toughness_3:veteran_toughness_regen_out_of_melee", rate = 0 }
+local CONTINUOUS_PART_CONFIRMED_KILL = { label = "talent_toughness_1:veteran_toughness_on_elite_kill_effect", rate = 0 }
+
+Pulses.continuous_parts = {
+    CONTINUOUS_PART_STANCE,
+    CONTINUOUS_PART_CATCH_A_BREATH,
+    CONTINUOUS_PART_CONFIRMED_KILL
+}
+
 --- Returns the summed rate of the continuous sources currently modelled as running.
 -- Executioner's Stance runs until its window ends, Catch a Breath once no melee hit was taken for
 -- its cooldown, and Confirmed Kill's regeneration until its window ends. The HUD element uses it
 -- only at full Toughness, where the bar cannot show these sources.
 -- treturn: number fraction of maximum Toughness per second, before stat buffs
 Pulses.active_continuous_fraction = function()
+    CONTINUOUS_PART_STANCE.rate = 0
+    CONTINUOUS_PART_CATCH_A_BREATH.rate = 0
+    CONTINUOUS_PART_CONFIRMED_KILL.rate = 0
+
     if not Pulses.enabled or _is_disabled() then
         return 0
     end
@@ -339,14 +382,17 @@ Pulses.active_continuous_fraction = function()
 
     if Pulses.has_executioners_stance and now < Pulses.stance_active_until then
         total = total + Sources.stance_regen_rate
+        CONTINUOUS_PART_STANCE.rate = Sources.stance_regen_rate
     end
 
     if Pulses.has_catch_a_breath and now > Pulses.catch_a_breath_last_hit_t + Sources.catch_a_breath_cooldown then
         total = total + Sources.catch_a_breath_rate
+        CONTINUOUS_PART_CATCH_A_BREATH.rate = Sources.catch_a_breath_rate
     end
 
     if Pulses.has_confirmed_kill and now < Pulses.confirmed_kill_regen_until then
         total = total + Sources.confirmed_kill_regen_rate
+        CONTINUOUS_PART_CONFIRMED_KILL.rate = Sources.confirmed_kill_regen_rate
     end
 
     return total
@@ -459,7 +505,7 @@ Pulses.on_proc_active = function(buff_extension, index)
         fixed_percentage = fixed_percentage * math_min(fire_step, Sources.max_continuous_fire_steps)
     end
 
-    _add_pulse(fixed_percentage, false)
+    _add_pulse(fixed_percentage, false, SOURCE_BLESSING)
 end
 
 --- Records what one attack report means for the Veteran's restores and timers.
@@ -495,11 +541,11 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 
     if Pulses.has_out_for_blood then
-        _add_pulse(Sources.out_for_blood_fraction, true)
+        _add_pulse(Sources.out_for_blood_fraction, true, SOURCE_OUT_FOR_BLOOD)
     end
 
     if Pulses.has_exhilarating and hit_weakspot and attack_type == ATTACK_TYPE_RANGED then
-        _add_pulse(Sources.exhilarating_fraction, true)
+        _add_pulse(Sources.exhilarating_fraction, true, SOURCE_EXHILARATING)
     end
 
     local is_elite_or_special = false
@@ -513,7 +559,7 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 
     if Pulses.has_confirmed_kill and is_elite_or_special then
-        _add_pulse(Sources.confirmed_kill_instant_fraction, true)
+        _add_pulse(Sources.confirmed_kill_instant_fraction, true, SOURCE_CONFIRMED_KILL)
 
         Pulses.confirmed_kill_regen_until = _now() + Sources.confirmed_kill_regen_duration
     end
@@ -534,7 +580,7 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
         local stacks = _focus_target_stacks()
 
         if stacks > 0 then
-            _add_pulse(Sources.target_down_fraction_per_stack * stacks, false)
+            _add_pulse(Sources.target_down_fraction_per_stack * stacks, false, SOURCE_TARGET_DOWN)
         end
     end
 end
@@ -572,11 +618,11 @@ local function _on_your_toes(t, is_ranged, is_melee)
     if is_ranged and t > Pulses.last_ranged_wield_t + cooldown then
         Pulses.last_ranged_wield_t = t
 
-        _add_pulse(Sources.on_your_toes_fraction, true)
+        _add_pulse(Sources.on_your_toes_fraction, true, SOURCE_ON_YOUR_TOES)
     elseif is_melee and t > Pulses.last_melee_wield_t + cooldown then
         Pulses.last_melee_wield_t = t
 
-        _add_pulse(Sources.on_your_toes_fraction, true)
+        _add_pulse(Sources.on_your_toes_fraction, true, SOURCE_ON_YOUR_TOES)
     end
 end
 
