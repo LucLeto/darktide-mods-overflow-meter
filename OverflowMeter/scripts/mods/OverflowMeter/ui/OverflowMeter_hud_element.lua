@@ -1017,10 +1017,31 @@ HudElementOverflowMeter._sample_bar_gain = function (self)
         end
     end
 
-    -- TEMPORARY: the modelled at-full regeneration for the solo-play comparison, under the pulse
-    -- module's label when it has one.
+    -- TEMPORARY: the modelled at-full regeneration for the solo-play comparison, split by the pulse
+    -- module's labelled parts when it has them, else under its label.
     if continuous_overflow > 0 and mod._debug_truth then
-        mod._debug_truth.record_mod(pulses.continuous_source or "continuous_model", continuous_overflow, continuous_overflow)
+        local parts = pulses.continuous_parts
+        local parts_rate = 0
+
+        if parts then
+            for i = 1, #parts do
+                parts_rate = parts_rate + parts[i].rate
+            end
+        end
+
+        if parts_rate > 0 then
+            for i = 1, #parts do
+                local part = parts[i]
+
+                if part.rate > 0 then
+                    local amount = continuous_overflow * part.rate / parts_rate
+
+                    mod._debug_truth.record_mod(part.label, amount, amount)
+                end
+            end
+        else
+            mod._debug_truth.record_mod(pulses.continuous_source or "continuous_model", continuous_overflow, continuous_overflow)
+        end
     end
 
     local burst_share = pulses.consume_burst()
