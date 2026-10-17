@@ -29,6 +29,15 @@ local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local FULL_TOUGHNESS_EPSILON = 0.999
 local COMBAT_ABILITY_TYPE = "combat_ability"
 
+--- TEMPORARY: labels of the counted sources for the solo-play comparison, matching the game's
+-- reason, or the reason and the buff template that restored where several talents share one.
+local SOURCE_MELEE_KILL = "melee_kill"
+local SOURCE_WEAKSPOT_KILL = "cryptic_talent:cryptic_weakspot_kills_restore_toughness"
+local SOURCE_DISSECTOR = "cryptic_talent:cryptic_dissector"
+local SOURCE_DISCHARGE_HIT = "discharge_hit"
+local SOURCE_DISCHARGE_USE = "discharge_use"
+local SOURCE_BLESSING = "blessing"
+
 --- Pulse state: the pending queues, the local Skitarius' unit and extensions, and whether the
 -- build has the talent behind each kill or hit pulse.
 local Pulses = {
@@ -135,17 +144,26 @@ end
 
 --- Adds the part of a restore that exceeds the missing Toughness to the overflow.
 -- number: fraction restore as a fraction of maximum Toughness
-local function _accumulate_overflow(fraction)
+-- string: source TEMPORARY label of the source
+local function _accumulate_overflow(fraction, source)
     local toughness_extension = Pulses.toughness_extension
 
     if not toughness_extension then
         return
     end
 
-    local excess = fraction * toughness_extension:max_toughness() - toughness_extension:toughness_damage()
+    local wanted = fraction * toughness_extension:max_toughness()
+    local excess = wanted - toughness_extension:toughness_damage()
 
     if excess > 0 then
         Pulses.pending_overflow = Pulses.pending_overflow + excess
+    end
+
+    -- TEMPORARY: per-source figures for the solo-play comparison.
+    local debug_truth = mod._debug_truth
+
+    if debug_truth then
+        debug_truth.record_mod(source, wanted, excess > 0 and excess or 0)
     end
 end
 
@@ -154,7 +172,8 @@ end
 -- ?bool: apply_replenish_stat_buffs scale by `toughness_replenish_modifier` and
 -- `toughness_replenish_multiplier`, as the game does for restores that use stat buffs
 -- ?bool: as_burst queue a restore at full as a burst instead of a pulse
-local function _add_pulse(fraction, apply_replenish_stat_buffs, as_burst)
+-- string: source TEMPORARY label of the source
+local function _add_pulse(fraction, apply_replenish_stat_buffs, as_burst, source)
     if not fraction or fraction <= 0 then
         return
     end
@@ -168,7 +187,7 @@ local function _add_pulse(fraction, apply_replenish_stat_buffs, as_burst)
         end
     end
 
-    _accumulate_overflow(fraction)
+    _accumulate_overflow(fraction, source)
 
     if _is_full() then
         if as_burst then
@@ -192,7 +211,7 @@ local function _add_melee_kill_pulse()
     end
 
     if fraction > 0 then
-        _accumulate_overflow(fraction)
+        _accumulate_overflow(fraction, SOURCE_MELEE_KILL)
 
         if _is_full() then
             Pulses.pending_fraction = Pulses.pending_fraction + fraction
@@ -246,7 +265,7 @@ Pulses.on_proc_active = function(buff_extension, index)
         fixed_percentage = fixed_percentage * math_min(fire_step, Sources.max_continuous_fire_steps)
     end
 
-    _add_pulse(fixed_percentage, false)
+    _add_pulse(fixed_percentage, false, false, SOURCE_BLESSING)
 end
 
 --- Records the restores triggered by one of the local player's attack reports.
@@ -265,7 +284,7 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 
     if Pulses.has_discharge_toughness_talent and damage_profile and damage_profile.name == Sources.discharge_damage_profile_name then
-        _add_pulse(Sources.discharge_hit_fraction, true)
+        _add_pulse(Sources.discharge_hit_fraction, true, false, SOURCE_DISCHARGE_HIT)
     end
 
     if attack_result ~= ATTACK_RESULT_DIED then
@@ -277,7 +296,7 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
     end
 
     if hit_weakspot and Pulses.has_weakspot_talent then
-        _add_pulse(Sources.weakspot_kill_fraction, true)
+        _add_pulse(Sources.weakspot_kill_fraction, true, false, SOURCE_WEAKSPOT_KILL)
     end
 
     if Pulses.has_dissector_talent and attacked_unit then
@@ -286,7 +305,7 @@ Pulses.on_attack_result = function(damage_profile, attacked_unit, attacking_unit
         local tags = breed and breed.tags
 
         if tags and (tags.elite or tags.special) then
-            _add_pulse(Sources.dissector_kill_fraction, true)
+            _add_pulse(Sources.dissector_kill_fraction, true, false, SOURCE_DISSECTOR)
         end
     end
 end
@@ -330,7 +349,7 @@ mod:hook_safe(CLASS.ActionCrypticDischarge, "start", function(self, action_setti
     local talent_extension = self._talent_extension
 
     if talent_extension and talent_extension.has_special_rule and talent_extension:has_special_rule(Sources.discharge_restore_special_rule) then
-        _add_pulse(Sources.discharge_use_fraction * _discharge_charges(self), true, true)
+        _add_pulse(Sources.discharge_use_fraction * _discharge_charges(self), true, true, SOURCE_DISCHARGE_USE)
     end
 end)
 

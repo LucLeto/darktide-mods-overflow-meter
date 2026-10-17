@@ -927,6 +927,21 @@ HudElementOverflowMeter._sample = function (self)
 
         stats_overflow = stats_overflow + continuous_amount
         stats_shareable = stats_shareable + continuous_amount
+
+        -- TEMPORARY: each active adapter's amount at full for the solo-play comparison.
+        local debug_truth = mod._debug_truth
+
+        if debug_truth then
+            for i = 1, #adapters do
+                local adapter = adapters[i]
+
+                if adapter.is_active(ctx) then
+                    local amount = adapter.estimate_per_second(ctx) * max_toughness * replenish_multiplier * SAMPLE_INTERVAL
+
+                    debug_truth.record_mod(debug_truth.adapter_label(adapter.name), amount, amount)
+                end
+            end
+        end
     end
 
     Stats.add_event(bar_gain, stats_overflow, sharing and stats_shareable or 0, allies)

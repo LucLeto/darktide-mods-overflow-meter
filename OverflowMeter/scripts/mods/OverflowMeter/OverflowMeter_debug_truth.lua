@@ -13,8 +13,10 @@
 -- The pulse modules label what they count with the game's replenish reason (`record_mod`), so the
 -- breakdown sets each source's requested and overflowed amounts against the game's. Sources the
 -- game restores without a reason (`<nil>`) are labelled by the mod and summed onto `<nil>`
--- (`MOD_TAG_REASONS`), as are labels the mod splits off a reason. Only the Zealot and Psyker
--- modules label their sources so far.
+-- (`MOD_TAG_REASONS`), as are labels the mod splits off a reason. The Zealot, Psyker and Skitarii
+-- modules label their sources. Most Skitarii talents restore under the one reason
+-- `cryptic_talent`, so the game's side splits that reason by the buff template that restored,
+-- found on the call stack (`SPLIT_REASONS`).
 --
 -- It also records, for every restore the server applied before the mod saw it (kills, procs, the
 -- lunge), whether the replicated bar already showed it, and the overflow the old headroom read
@@ -28,8 +30,9 @@
 --
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
 -- Remove before release, together with its load line, its three calls there, the `record_mod`
--- calls in `OverflowMeter_pulses_zealot.lua`, `OverflowMeter_pulses_psyker.lua` and the HUD
--- element, and the warp profile line in `OverflowMeter_sources_psyker.lua`.
+-- calls in `OverflowMeter_pulses_zealot.lua`, `OverflowMeter_pulses_psyker.lua`,
+-- `OverflowMeter_pulses.lua` and the HUD element, the source labels passed in
+-- `OverflowMeter_pulses.lua`, and the warp profile line in `OverflowMeter_sources_psyker.lua`.
 -- module: OverflowMeter_debug_truth
 -- alias: Truth
 -- author: LucLeto
@@ -37,10 +40,13 @@ local mod = get_mod("OverflowMeter")
 local Stats = mod._stats
 
 local Managers = Managers
+local debug_getinfo = debug and debug.getinfo
+local debug_getlocal = debug and debug.getlocal
 local math_abs = math.abs
 local math_floor = math.floor
 local next = next
 local pairs = pairs
+local string_find = string.find
 local string_format = string.format
 local table_sort = table.sort
 local type = type
@@ -68,8 +74,38 @@ local MOD_TAG_REASONS = {
     psyker_melee_hit = "psyker_melee_toughness",
     warp_generation_residual = "toughness_on_warp_generation",
     vent_residual = "toughness_on_vent",
-    psyker_sphere = "psyker_sphere_own"
+    psyker_sphere = "psyker_sphere_own",
+    discharge_use = "ability_shout",
+    discharge_hit = "ability_shout"
 }
+
+--- Reasons the game shares between several talents, split by the buff template that restored:
+-- the key becomes `reason:template`.
+local SPLIT_REASONS = {
+    cryptic_talent = true
+}
+
+--- Buff templates the mod models together, summed under one key: the Skitarii adapter that
+-- covers every temporary regeneration talent.
+local TEMPLATE_GROUPS = {
+    cryptic_multi_hits_restore_toughness = "temporary_regeneration",
+    cryptic_crits_grant_tdr = "temporary_regeneration",
+    cryptic_elite_kills_toughness = "temporary_regeneration",
+    cryptic_electrocution_toughness = "temporary_regeneration",
+    cryptic_toughness_on_damage_taken = "temporary_regeneration",
+    cryptic_redline_toughness = "temporary_regeneration"
+}
+
+--- The Skitarii HUD adapters' labels, matching the game's keys above.
+local ADAPTER_LABELS = {
+    precision_stance = "ability_stance",
+    toughness_per_charge = "cryptic_talent:cryptic_toughness_per_charge",
+    ranged_kill_regeneration = "cryptic_talent:cryptic_ranged_stacking_toughness_stack",
+    temporary_regeneration = "cryptic_talent:temporary_regeneration"
+}
+
+--- How far up the call stack the restoring buff function is searched for.
+local MAX_STACK_DEPTH = 16
 
 --- The Telekine Dome's reason, the buff it gives everyone inside, and the key the game's restores
 -- inside the local Psyker's own dome are summed under (not ally support).
@@ -105,6 +141,43 @@ local function _local_unit()
     return player and player.player_unit
 end
 
+--- Returns the name of the buff template whose function asked for the restore, from the call
+-- stack: the nearest buff file frame with a `template_context` among its first parameters.
+-- treturn: ?string template name, nil when no buff restored or the debug library is missing
+local function _restoring_template()
+    if not debug_getinfo or not debug_getlocal then
+        return nil
+    end
+
+    for level = 3, MAX_STACK_DEPTH do
+        local info = debug_getinfo(level, "S")
+
+        if not info then
+            return nil
+        end
+
+        local source = info.source
+
+        if type(source) == "string" and string_find(source, "buff", 1, true) then
+            for index = 1, 4 do
+                local name, value = debug_getlocal(level, index)
+
+                if not name then
+                    break
+                end
+
+                if name == "template_context" and type(value) == "table" then
+                    local template = value.template
+
+                    return type(template) == "table" and template.name or nil
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
 -- The game restored, or tried to restore, Toughness on a player unit; sums the local player's.
 mod:hook_safe("PlayerUnitToughnessExtension", "_handle_procs", function (self, amount, recovered_amount, reason)
     if type(amount) ~= "number" or amount <= 0 or self._unit ~= _local_unit() then
@@ -113,7 +186,11 @@ mod:hook_safe("PlayerUnitToughnessExtension", "_handle_procs", function (self, a
 
     local key = reason or "<nil>"
 
-    if reason == DOME_REASON then
+    if SPLIT_REASONS[reason] then
+        local template_name = _restoring_template()
+
+        key = reason .. ":" .. (template_name and (TEMPLATE_GROUPS[template_name] or template_name) or "?")
+    elseif reason == DOME_REASON then
         local buff_extension = self._buff_extension
 
         if buff_extension and buff_extension.has_buff_using_buff_template_with_owner and buff_extension:has_buff_using_buff_template_with_owner(DOME_BUFF_NAME, self._unit) then
@@ -181,6 +258,13 @@ local function _totals_line(label)
         Stats.replenished,
         Stats.overflowed
     )
+end
+
+--- Returns the comparison label of a Skitarii HUD adapter, matching the game's split keys.
+-- string: name adapter name
+-- treturn: string
+Truth.adapter_label = function (name)
+    return ADAPTER_LABELS[name] or name
 end
 
 --- Adds one restore the mod counted.
