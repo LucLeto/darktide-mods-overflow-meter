@@ -536,10 +536,18 @@ mod.on_all_mods_loaded = function ()
     mod._snapshot.setup()
 end
 
---- DMF update callback; drives the periodic publishing and reading of mission summaries.
+--- DMF update callback; drives the periodic publishing and reading of mission summaries, and
+-- keeps the HUD element tracking on frames the HUD skipped it (a menu, the tactical overlay or a
+-- wheel hides the meter, but regeneration and sharing go on).
 -- number: dt frame delta time
 mod.update = function (dt)
     mod._share.update(dt)
+
+    local hud_element = mod._hud_element
+
+    if hud_element and mod:is_enabled() then
+        hud_element:background_update(dt)
+    end
 
     -- TEMPORARY: replenish debug summaries.
     if DEBUG_REPLENISH then
