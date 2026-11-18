@@ -2,13 +2,13 @@
 -- The HUD element measures what fills the replicated bar, which misses the part clamped at the
 -- cap and everything that lands at full. This module infers that part from client-side signals:
 -- kills and hits in local attack reports (melee kills, Soulstealer's warp kills and Warp
--- Expenditure's per-hit restore), weapon blessing procs, the Peril changes Quietude converts, and
--- the Psyker buffs whose replenish also runs on the client (Mettle, Souldrinker, Scrier's Gaze,
--- Warp Expenditure's weakspot-kill regeneration, and the Telekine Dome's while the dome is the
--- Psyker's own). It also models Disrupt Destiny's marked-kill restore and Essence Harvest's
--- regeneration while their buffs run: the first replenish carries no reason to capture, the second
--- runs on the server only. Restores the game refuses (knocked down, standing in fire or gas) are
--- not counted.
+-- Expenditure's per-hit restore), weapon blessing procs, Confident Strike's chained hits, the
+-- Peril changes Quietude converts, and the Psyker buffs whose replenish also runs on the client
+-- (Mettle, Souldrinker, Scrier's Gaze, Warp Expenditure's weakspot-kill regeneration, and the
+-- Telekine Dome's while the dome is the Psyker's own). It also models Disrupt Destiny's
+-- marked-kill restore and Essence Harvest's regeneration while their buffs run: the first
+-- replenish carries no reason to capture, the second runs on the server only. Restores the game
+-- refuses (knocked down, standing in fire or gas) are not counted.
 --
 -- Soulstealer, Warp Expenditure's per-hit restore and Quietude are proc functions of buffs the
 -- game does not predict, so only the server runs them. They are counted from their triggers on
@@ -23,14 +23,14 @@
 -- always read 0.
 --
 -- The clamped excess needs the missing Toughness from before the restore. The replenish requests
--- arrive before the game applies them, so the bar is current for them. Kills, hits, procs and
+-- and melee sweeps arrive before the game applies them, so the bar is current for them. Kills, hits, procs and
 -- Peril changes are seen only after the server has restored Toughness, and by then the bar can
 -- already show the restore (when hosting it always does). For those the missing Toughness at the
 -- last sample is used as well, less what the restores counted since then took up.
 --
 -- After a misprediction the client re-simulates the local unit's last frames, running its buffs
--- and Peril again. Replenish requests and Peril reports seen while the unit re-simulates were
--- already counted the first time, so they are ignored.
+-- and Peril again. Replenish requests, sweeps and Peril reports seen while the unit re-simulates
+-- were already counted the first time, so they are ignored.
 --
 -- Explicit module loaded by `OverflowMeter.lua` and stored as `mod._pulses_psyker`.
 -- `on_proc_active`, `on_proc_event`, `on_attack_result` and `on_replenish_percentage` are called
@@ -44,6 +44,7 @@ local AttackSettings = require("scripts/settings/damage/attack_settings")
 local BuffSettings = require("scripts/settings/buff/buff_settings")
 local Sources = mod._sources_psyker
 local Blocked = mod._blocked_replenish
+local ChainedHits = mod._chained_hits
 
 local ScriptUnit = ScriptUnit
 local Managers = Managers
@@ -53,6 +54,7 @@ local type = type
 local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local PROC_EVENT_WARP_CHARGE_CHANGED = BuffSettings.proc_events and BuffSettings.proc_events.on_warp_charge_changed or "on_warp_charge_changed"
+local PROC_EVENT_SWEEP_FINISH = BuffSettings.proc_events and BuffSettings.proc_events.on_sweep_finish or "on_sweep_finish"
 local WARP_CHARGE_EXPLODING = "exploding"
 --- Peril change below which the Peril and the reports count as agreeing (rounding only).
 local PERIL_EPSILON = 1e-6
@@ -93,6 +95,7 @@ local Pulses = {
     warp_charge_component = nil,
     character_state_component = nil,
     assisted_state_input_component = nil,
+    inventory_component = nil,
     has_warp_kill_talent = false,
     has_melee_hit_talent = false,
     has_warp_generation_talent = false,
@@ -150,12 +153,15 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.warp_charge_component = warp_charge_component
     Pulses.character_state_component = can_read and unit_data_extension:read_component("character_state")
     Pulses.assisted_state_input_component = can_read and unit_data_extension:read_component("assisted_state_input")
+    Pulses.inventory_component = can_read and unit_data_extension:read_component("inventory")
     Pulses.has_warp_kill_talent = _has_talent_buff(talent_extension, buff_extension, Sources.warp_kill_talent_buff_name)
     Pulses.has_melee_hit_talent = _has_talent_buff(talent_extension, buff_extension, Sources.melee_hit_talent_buff_name)
     Pulses.has_warp_generation_talent = _has_talent_buff(talent_extension, buff_extension, Sources.warp_generation_talent_buff_name)
     Pulses.has_vent_talent = _has_talent_buff(talent_extension, buff_extension, Sources.vent_talent_buff_name)
 
     if not same_unit then
+        ChainedHits.reset()
+
         if Pulses.has_warp_kill_talent then
             Sources.prepare_warp_profiles()
         end
@@ -171,6 +177,8 @@ end
 
 --- Disables the module and clears the queue, every cached reference, talent flag and tracker.
 Pulses.disable = function()
+    ChainedHits.reset()
+
     Pulses.enabled = false
     Pulses.continuous_source = SOURCE_CONTINUOUS_MODEL
     Pulses.pending_excess = 0
@@ -183,6 +191,7 @@ Pulses.disable = function()
     Pulses.warp_charge_component = nil
     Pulses.character_state_component = nil
     Pulses.assisted_state_input_component = nil
+    Pulses.inventory_component = nil
     Pulses.has_warp_kill_talent = false
     Pulses.has_melee_hit_talent = false
     Pulses.has_warp_generation_talent = false
@@ -438,7 +447,7 @@ end
 -- A blessing restores the fixed percentage from its tier's override data, or else the template,
 -- multiplied by the fire step (at most 5) for continuous fire, and ignores Toughness stat buffs.
 -- A multi-hit blessing restores its tier's `buff_data.replenish_percentage` instead, scaled by the
--- stat buffs.
+-- stat buffs. Confident Strike's activations are skipped: its restores come from the sweeps.
 -- tab: buff_extension buff extension whose proc became active
 -- ?int: index index of the buff instance
 Pulses.on_proc_active = function(buff_extension, index)
@@ -454,7 +463,7 @@ Pulses.on_proc_active = function(buff_extension, index)
 
     local template_name = buff_instance:template_name()
 
-    if not Sources.weapon_toughness_proc_templates[template_name] then
+    if not Sources.weapon_toughness_proc_templates[template_name] or ChainedHits.templates[template_name] then
         return
     end
 
@@ -489,15 +498,35 @@ Pulses.on_proc_active = function(buff_extension, index)
     _add_pulse(fixed_percentage, false, SOURCE_BLESSING)
 end
 
---- Records a Peril change the game reported to the local player's buff system, for Quietude.
--- The report's `percentage_change` is the old Peril less the new, the amount Quietude converts.
--- Every report is noted for the frame's leftover in `update`; reports while the unit re-simulates
--- repeat changes counted the first time and restore nothing more.
+--- Records what a buff event queued for the local player restores.
+-- A Peril change feeds Quietude. The report's `percentage_change` is the old Peril less the new,
+-- the amount Quietude converts. Every report is noted for the frame's leftover in `update`;
+-- reports while the unit re-simulates repeat changes counted the first time and restore nothing
+-- more. A finished melee sweep may give Confident Strike's restore; the event comes before the
+-- game applies it, and sweeps while the unit re-simulates were counted the first time.
 -- tab: buff_extension buff extension the event was queued for
 -- string: event proc event name
 -- ?tab: params event parameters
 Pulses.on_proc_event = function(buff_extension, event, params)
-    if not Pulses.enabled or buff_extension ~= Pulses.buff_extension or event ~= PROC_EVENT_WARP_CHARGE_CHANGED then
+    if not Pulses.enabled or buff_extension ~= Pulses.buff_extension then
+        return
+    end
+
+    if event == PROC_EVENT_SWEEP_FINISH then
+        if _is_resimulating() then
+            return
+        end
+
+        local fraction = ChainedHits.on_sweep_finish(buff_extension, params, Pulses.inventory_component)
+
+        if fraction then
+            _add_pulse(fraction, false, SOURCE_BLESSING, true)
+        end
+
+        return
+    end
+
+    if event ~= PROC_EVENT_WARP_CHARGE_CHANGED then
         return
     end
 

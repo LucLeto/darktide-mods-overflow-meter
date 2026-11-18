@@ -888,6 +888,13 @@ HudElementOverflowMeter._sample = function (self)
         replenish_multiplier = (stat_buffs.toughness_replenish_modifier or 1) * (stat_buffs.toughness_replenish_multiplier or 1)
     end
 
+    -- TEMPORARY: this sample's bar state for the solo-play comparison.
+    local debug_truth = mod._debug_truth
+
+    if debug_truth then
+        debug_truth.record_sample(toughness_extension:toughness_damage(), max_toughness, total_rate > 0)
+    end
+
     local share_per_ally_per_second = total_rate > 0 and total_rate * max_toughness * replenish_multiplier * sources.share_fraction or 0
 
     local sharing = self._sharing
@@ -932,8 +939,6 @@ HudElementOverflowMeter._sample = function (self)
         stats_shareable = stats_shareable + continuous_amount
 
         -- TEMPORARY: each active adapter's amount at full for the solo-play comparison.
-        local debug_truth = mod._debug_truth
-
         if debug_truth then
             for i = 1, #adapters do
                 local adapter = adapters[i]
@@ -968,6 +973,11 @@ HudElementOverflowMeter._sample_bar_gain = function (self)
     local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
     local share_fraction = sources.share_fraction
     local bar_gain = self:_consume_bar_gain(toughness_damage, max_toughness)
+
+    -- TEMPORARY: this sample's bar state for the solo-play comparison.
+    if mod._debug_truth then
+        mod._debug_truth.record_sample(toughness_damage, max_toughness, pulses.active_continuous_fraction() > 0)
+    end
 
     local sharing = self._sharing
     local allies, allies_missing = 0, 0
