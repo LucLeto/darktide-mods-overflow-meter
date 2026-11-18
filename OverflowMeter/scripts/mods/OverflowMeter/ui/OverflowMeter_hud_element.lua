@@ -2,13 +2,20 @@
 -- Once a second it checks whether the local player is in a mission as a tracked archetype
 -- (Skitarii, Veteran, Zealot or Psyker) and wires up that archetype's sources and pulse module;
 -- sharing is tracked as well when the build has its archetype's sharing talent (a Skitarius with
--- Power Overflow or a Veteran with Born Leader). A pulse module that follows a value every frame
--- (the Psyker's Peril) is updated every frame. Four times a second it samples: it measures what the
--- replicated Toughness bar gained, sums the active continuous sources (Skitarii) or the modelled
--- at-full regeneration (every other archetype), drains the pulse queues and adds the sample to
--- the mission statistics. With a sharing talent it also counts the allies in Coherency and those
--- missing Toughness and feeds the estimator; without one the meter stays hidden. The meter (gauge,
--- readout, state and context lines) is only redrawn when a displayed value changes.
+-- Power Overflow or a Veteran with Born Leader). Every frame it adds up what the replicated
+-- Toughness bar gained, and updates a pulse module that follows a value every frame (the Psyker's
+-- Peril). Four times a second it samples: it takes the bar's gains since the last sample, sums the
+-- active continuous sources (Skitarii) or the modelled at-full regeneration (every other
+-- archetype), drains the pulse queues and adds the sample to the mission statistics. With a
+-- sharing talent it also counts the allies in Coherency and those missing Toughness and feeds the
+-- estimator; without one the meter stays hidden. The meter (gauge, readout, state and context
+-- lines) is only redrawn when a displayed value changes.
+--
+-- The game updates a HUD element only while its visibility group is active, and a menu, the
+-- tactical overlay or a wheel replaces the `alive` group the meter is in, while Toughness keeps
+-- regenerating and Power Overflow keeps sharing. So the element registers itself as
+-- `mod._hud_element`, and `mod.update` keeps the frame work and the samples running on every frame
+-- the HUD skipped, without drawing.
 --
 -- The mission summary panel is a second widget of the same element, shown while the hold key is
 -- down or permanently. The element also pushes the local totals to the scoreboard snapshot once a
@@ -48,6 +55,9 @@ local table_clear = table.clear
 -- full means 99.9 % Toughness, and an ally misses Toughness above half a point of damage.
 local GUARD_INTERVAL = 1
 local SAMPLE_INTERVAL = 0.25
+--- How far the sample timer may fall behind after a long frame: at most this many samples are
+-- caught up, one per frame.
+local MAX_SAMPLE_CATCH_UP = 3 * SAMPLE_INTERVAL
 local FULL_TOUGHNESS_EPSILON = 0.999
 local MISSING_TOUGHNESS_EPSILON = 0.5
 local ARCHETYPE_CRYPTIC = "cryptic"
@@ -435,10 +445,13 @@ HudElementOverflowMeter.init = function (self, parent, draw_layer, start_scale)
     self._pulses = nil
     self._last_toughness_damage = nil
     self._last_max_toughness = nil
+    self._pending_bar_gain = 0
     self._burst_flash_remaining = 0
     self._burst_flash_amount = 0
     self._guard_timer = 0
     self._sample_timer = 0
+    self._updated = false
+    self._previous_dt = nil
     self._opacity = 1
     self._force_refresh = true
     self._summary_shown = false
@@ -452,6 +465,18 @@ HudElementOverflowMeter.init = function (self, parent, draw_layer, start_scale)
     self._widgets_by_name.summary.content.visible = false
 
     self:_apply_display_settings(mod._settings)
+
+    mod._hud_element = self
+end
+
+--- Unregisters the element from `mod.update` before the HUD destroys it.
+-- tab: ui_renderer UI renderer
+HudElementOverflowMeter.destroy = function (self, ui_renderer)
+    if mod._hud_element == self then
+        mod._hud_element = nil
+    end
+
+    HudElementOverflowMeter.super.destroy(self, ui_renderer)
 end
 
 --- Forgets every last-drawn value, so the next refresh rewrites everything.
@@ -481,8 +506,8 @@ end
 -- Reapplies the display settings after a change and resets after a reset request. Once a second
 -- it follows Custom HUD changes, rechecks support and pushes the scoreboard snapshot. The summary
 -- panel refreshes every frame when its data changed; while supported and the player unit is
--- alive, a pulse module with an `update` function is updated every frame, and Toughness is
--- sampled and the meter refreshed every `SAMPLE_INTERVAL`.
+-- alive, it runs the frame work (`_tick`) and refreshes the meter after each sample. It also marks
+-- the frame as updated, so `mod.update` does not run the frame work a second time.
 -- number: dt frame delta time
 -- number: t time
 -- tab: ui_renderer UI renderer
@@ -490,6 +515,8 @@ end
 -- tab: input_service input service
 HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_settings, input_service)
     HudElementOverflowMeter.super.update(self, dt, t, ui_renderer, render_settings, input_service)
+
+    self._updated = true
 
     local settings = mod._settings
 
@@ -506,6 +533,7 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
         self._estimator:reset()
 
         self._last_toughness_damage = nil
+        self._pending_bar_gain = 0
         self._burst_flash_remaining = 0
 
         self._guard_timer = 0
@@ -533,6 +561,8 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
 
             if supported then
                 self._sample_timer = 0
+                self._last_toughness_damage = nil
+                self._pending_bar_gain = 0
                 self._force_refresh = true
             else
                 self:_reset_display()
@@ -559,20 +589,79 @@ HudElementOverflowMeter.update = function (self, dt, t, ui_renderer, render_sett
         return
     end
 
+    if self:_tick(dt) then
+        self:_refresh_display(settings)
+    end
+end
+
+--- Runs one frame of tracking: adds the bar's gain, updates a pulse module that follows a value
+-- every frame, and samples when the sample timer runs out. The timer keeps what a frame overshot,
+-- so samples stay `SAMPLE_INTERVAL` apart on average whatever the frame rate; after a long frame
+-- it catches up one sample per frame, at most `MAX_SAMPLE_CATCH_UP` worth.
+-- number: dt frame delta time
+-- treturn: bool whether it sampled
+HudElementOverflowMeter._tick = function (self, dt)
+    self:_track_bar_gain()
+
     local update_pulses = self._pulses.update
 
     if update_pulses then
         update_pulses()
     end
 
-    self._sample_timer = self._sample_timer - dt
+    local sample_timer = self._sample_timer - dt
 
-    if self._sample_timer <= 0 then
-        self._sample_timer = SAMPLE_INTERVAL
+    if sample_timer > 0 then
+        self._sample_timer = sample_timer
 
-        self:_sample()
-        self:_refresh_display(settings)
+        return false
     end
+
+    sample_timer = sample_timer + SAMPLE_INTERVAL
+
+    if sample_timer < -MAX_SAMPLE_CATCH_UP then
+        sample_timer = -MAX_SAMPLE_CATCH_UP
+    end
+
+    self._sample_timer = sample_timer
+
+    self:_sample()
+
+    return true
+end
+
+--- Keeps tracking on frames the HUD did not update the element, because a menu, the tactical
+-- overlay or a wheel replaced its visibility group. `mod.update` calls it every frame. The mod
+-- loader runs mod updates before the game's own update, so a call can only tell whether the
+-- element was updated on the previous frame; a frame it missed is caught up one frame late, with
+-- that frame's delta time, and the bar read then is the one that frame left. So every frame is
+-- tracked exactly once, also when the element becomes hidden or visible again. Nothing is drawn;
+-- the meter shows the new values once it is visible again. Support is rechecked only by the
+-- element's own update, so this does nothing while unsupported, before a pending reset or when the
+-- player unit is gone.
+-- number: dt delta time of the frame that is starting
+HudElementOverflowMeter.background_update = function (self, dt)
+    local missed_dt = self._previous_dt
+
+    self._previous_dt = dt
+
+    if self._updated then
+        self._updated = false
+
+        return
+    end
+
+    if not missed_dt or not self._supported or mod._reset_requested then
+        return
+    end
+
+    local alive_units = ALIVE
+
+    if not alive_units or not alive_units[self._ctx.unit] then
+        return
+    end
+
+    self:_tick(missed_dt)
 end
 
 -- ----------------------------------------------------------------------------
@@ -735,6 +824,7 @@ HudElementOverflowMeter._set_archetype = function (self, archetype, sharing)
     self._sources = mod._sources_by_archetype[archetype]
     self._pulses = mod._pulses_by_archetype[archetype]
     self._last_toughness_damage = nil
+    self._pending_bar_gain = 0
     self._burst_flash_remaining = 0
 
     local sources = self._sources
@@ -787,26 +877,31 @@ HudElementOverflowMeter._count_allies = function (self)
     return allies, allies_missing
 end
 
---- Returns how much Toughness the bar gained since the last sample.
--- A sample in which maximum Toughness changed is skipped, so a raised cap (such as Duty and
--- Honour's bonus Toughness) is not mistaken for a replenish.
--- number: toughness_damage current Toughness damage
--- number: max_toughness current maximum Toughness
--- treturn: number Toughness points recovered, 0 or more
-HudElementOverflowMeter._consume_bar_gain = function (self, toughness_damage, max_toughness)
+--- Adds what the bar gained since the last frame to the gain of the running sample.
+-- Following the bar every frame keeps a restore that damage undoes within the same quarter second,
+-- which a per-sample difference would net out. A frame in which maximum Toughness changed is
+-- skipped, so a raised cap (such as Duty and Honour's bonus Toughness) is not mistaken for a
+-- replenish.
+HudElementOverflowMeter._track_bar_gain = function (self)
+    local toughness_extension = self._ctx.toughness_extension
+    local toughness_damage = toughness_extension:toughness_damage()
+    local max_toughness = toughness_extension:max_toughness()
     local last_damage = self._last_toughness_damage
-    local bar_gain = 0
 
-    if last_damage and self._last_max_toughness == max_toughness then
-        local recovered = last_damage - toughness_damage
-
-        if recovered > 0 then
-            bar_gain = recovered
-        end
+    if last_damage and last_damage > toughness_damage and self._last_max_toughness == max_toughness then
+        self._pending_bar_gain = self._pending_bar_gain + last_damage - toughness_damage
     end
 
     self._last_toughness_damage = toughness_damage
     self._last_max_toughness = max_toughness
+end
+
+--- Returns and clears what the bar gained since the last sample.
+-- treturn: number Toughness points recovered, 0 or more
+HudElementOverflowMeter._consume_bar_gain = function (self)
+    local bar_gain = self._pending_bar_gain
+
+    self._pending_bar_gain = 0
 
     return bar_gain
 end
@@ -869,7 +964,7 @@ HudElementOverflowMeter._sample = function (self)
     local toughness_extension = ctx.toughness_extension
     local max_toughness = toughness_extension:max_toughness()
     local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
-    local bar_gain = self:_consume_bar_gain(toughness_extension:toughness_damage(), max_toughness)
+    local bar_gain = self:_consume_bar_gain()
     local adapters = sources.adapters
     local total_rate = 0
 
@@ -972,7 +1067,7 @@ HudElementOverflowMeter._sample_bar_gain = function (self)
     local toughness_damage = toughness_extension:toughness_damage()
     local is_full = toughness_extension:current_toughness_percent() >= FULL_TOUGHNESS_EPSILON
     local share_fraction = sources.share_fraction
-    local bar_gain = self:_consume_bar_gain(toughness_damage, max_toughness)
+    local bar_gain = self:_consume_bar_gain()
 
     -- TEMPORARY: this sample's bar state for the solo-play comparison.
     if mod._debug_truth then
