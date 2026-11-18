@@ -2,8 +2,9 @@
 -- The HUD element measures what fills the replicated bar, which misses the part clamped at the
 -- cap and everything that lands at full. This module infers that part from client-side events:
 -- kills in local attack reports (melee kills and heavy-attack kills), weapon blessing and dodge
--- procs, Chastise the Wicked's dash, and the Zealot buffs whose replenish also runs on the client
--- (Shroudfield, the in-melee regeneration, Momentum and Fanatic Rage at maximum stacks). It also
+-- procs, Confident Strike's chained hits, Chastise the Wicked's dash, and the Zealot buffs whose
+-- replenish also runs on the client (Shroudfield, the in-melee regeneration, Momentum and Fanatic
+-- Rage at maximum stacks). It also
 -- models the elite-kill regeneration while its buff runs, because its replenish carries no reason
 -- to capture. Restores the game refuses (knocked down, standing in fire or gas) are not counted.
 --
@@ -12,18 +13,18 @@
 -- always read 0.
 --
 -- The clamped excess needs the missing Toughness from before the restore. The replenish requests
--- arrive before the game applies them, so the bar is current for them. Kills, procs and the lunge
--- are seen only after the server has restored Toughness, and by then the bar can already show the
--- restore (when hosting it always does). For those the missing Toughness at the last sample is
--- used as well, less what the restores counted since then took up.
+-- and melee sweeps arrive before the game applies them, so the bar is current for them. Kills,
+-- procs and the lunge are seen only after the server has restored Toughness, and by then the bar
+-- can already show the restore (when hosting it always does). For those the missing Toughness at
+-- the last sample is used as well, less what the restores counted since then took up.
 --
 -- After a misprediction the client re-simulates the local unit's last frames, running its buffs
--- and character states again. Replenish requests and lunges seen while the unit re-simulates were
--- already counted the first time, so they are ignored.
+-- and character states again. Replenish requests, sweeps and lunges seen while the unit
+-- re-simulates were already counted the first time, so they are ignored.
 --
 -- Explicit module loaded by `OverflowMeter.lua` and stored as `mod._pulses_zealot`.
--- `on_proc_active`, `on_attack_result` and `on_replenish_percentage` are called from the shared
--- hooks in `OverflowMeter.lua`; the lunge hook is registered here, because no other module needs
+-- `on_proc_active`, `on_proc_event`, `on_attack_result` and `on_replenish_percentage` are called
+-- from the shared hooks in `OverflowMeter.lua`; the lunge hook is registered here, because no other module needs
 -- it yet (once another archetype's lunge is tracked it has to move to the shared hooks, since DMF
 -- keeps only one hook per mod and method). `set_context` enables it for the local player's unit,
 -- and it ignores every event while disabled.
@@ -32,9 +33,11 @@
 -- author: LucLeto
 local mod = get_mod("OverflowMeter")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
+local BuffSettings = require("scripts/settings/buff/buff_settings")
 local LungeTemplates = require("scripts/settings/lunge/lunge_templates")
 local Sources = mod._sources_zealot
 local Blocked = mod._blocked_replenish
+local ChainedHits = mod._chained_hits
 
 local ScriptUnit = ScriptUnit
 local Managers = Managers
@@ -44,6 +47,7 @@ local type = type
 local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local MELEE_ATTACK_STRENGTH_HEAVY = "heavy"
+local PROC_EVENT_SWEEP_FINISH = BuffSettings.proc_events and BuffSettings.proc_events.on_sweep_finish or "on_sweep_finish"
 
 --- Labels of the counted sources: the game's replenish reason where the source has one, which
 -- lets the TEMPORARY solo-play comparison set each source against the game's own figure.
@@ -70,6 +74,7 @@ local Pulses = {
     unit_data_extension = nil,
     character_state_component = nil,
     assisted_state_input_component = nil,
+    inventory_component = nil,
     has_heavy_kill_talent = false,
     last_stealth_t = NEVER,
     last_lunge_t = NEVER
@@ -114,9 +119,12 @@ Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_
     Pulses.unit_data_extension = unit_data_extension
     Pulses.character_state_component = can_read and unit_data_extension:read_component("character_state")
     Pulses.assisted_state_input_component = can_read and unit_data_extension:read_component("assisted_state_input")
+    Pulses.inventory_component = can_read and unit_data_extension:read_component("inventory")
     Pulses.has_heavy_kill_talent = _has_talent_buff(talent_extension, Sources.heavy_kill_talent_buff_name)
 
     if not same_unit then
+        ChainedHits.reset()
+
         Pulses.sample_damage = toughness_extension:toughness_damage()
         Pulses.used_headroom = 0
         Pulses.last_stealth_t = NEVER
@@ -126,6 +134,8 @@ end
 
 --- Disables the module and clears the queue, every cached reference, the talent flag and the timers.
 Pulses.disable = function()
+    ChainedHits.reset()
+
     Pulses.enabled = false
     Pulses.pending_excess = 0
     Pulses.sample_damage = 0
@@ -136,6 +146,7 @@ Pulses.disable = function()
     Pulses.unit_data_extension = nil
     Pulses.character_state_component = nil
     Pulses.assisted_state_input_component = nil
+    Pulses.inventory_component = nil
     Pulses.has_heavy_kill_talent = false
     Pulses.last_stealth_t = NEVER
     Pulses.last_lunge_t = NEVER
@@ -338,7 +349,7 @@ end
 -- multiplied by the fire step (at most 5) for continuous fire, and ignores Toughness stat buffs.
 -- A multi-hit blessing restores its tier's `buff_data.replenish_percentage` instead, scaled by the
 -- stat buffs. A talent proc restores its template's `toughness_percentage`, scaled by the stat
--- buffs.
+-- buffs. Confident Strike's activations are skipped: its restores come from the sweeps.
 -- tab: buff_extension buff extension whose proc became active
 -- ?int: index index of the buff instance
 Pulses.on_proc_active = function(buff_extension, index)
@@ -364,7 +375,7 @@ Pulses.on_proc_active = function(buff_extension, index)
         return
     end
 
-    if not Sources.weapon_toughness_proc_templates[template_name] then
+    if not Sources.weapon_toughness_proc_templates[template_name] or ChainedHits.templates[template_name] then
         return
     end
 
@@ -397,6 +408,24 @@ Pulses.on_proc_active = function(buff_extension, index)
     end
 
     _add_pulse(fixed_percentage, false, SOURCE_BLESSING)
+end
+
+--- Records Confident Strike's restore when a finished melee sweep gives one.
+-- The sweep event comes before the game applies the restore; sweeps while the unit re-simulates
+-- were counted the first time.
+-- tab: buff_extension buff extension the event was queued for
+-- string: event proc event name
+-- ?tab: params event parameters
+Pulses.on_proc_event = function(buff_extension, event, params)
+    if not Pulses.enabled or buff_extension ~= Pulses.buff_extension or event ~= PROC_EVENT_SWEEP_FINISH or _is_resimulating() then
+        return
+    end
+
+    local fraction = ChainedHits.on_sweep_finish(buff_extension, params, Pulses.inventory_component)
+
+    if fraction then
+        _add_pulse(fraction, false, SOURCE_BLESSING, true)
+    end
 end
 
 --- Records what one of the Zealot's own kills restores.

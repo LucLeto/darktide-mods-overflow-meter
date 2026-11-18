@@ -6,9 +6,9 @@
 --    stance), Auto-Repair Doctrines, Superior Defence Engrams and the temporary regeneration
 --    talents. Each adapter reports whether it is active, its current rate, whether the build
 --    has it and its highest rate. Rates are fractions of maximum Toughness per second.
--- 2. Discrete restores (melee and weakspot kills, Flensing Protocols, Voltaic Overcharge and
---    weapon blessing procs) are exported as fractions, buff names and template sets for
---    `OverflowMeter_pulses.lua`.
+-- 2. Discrete restores (melee and weakspot kills, Flensing Protocols, Voltaic Overcharge,
+--    Voltaic Restoration, Data Sensor Protocol, Invigorating Overload and weapon blessing procs)
+--    are exported as fractions, buff names and template sets for `OverflowMeter_pulses.lua`.
 --
 -- Explicit module loaded by `OverflowMeter.lua` and stored as `mod._sources` (and as `cryptic`
 -- in `mod._sources_by_archetype`). Adapters receive the HUD element's sample context:
@@ -62,6 +62,16 @@ local discharge_toughness_settings = discharge_ability_settings and discharge_ab
 local discharge_use_fraction = discharge_toughness_settings and discharge_toughness_settings.toughness_percent_on_use or 0.25
 local discharge_hit_fraction = discharge_toughness_settings and discharge_toughness_settings.toughness_percent_per_hit or 0.01
 
+local voltaic_restoration_settings = cryptic_settings.cryptic_coherency_toughness_on_ability
+local voltaic_restoration_fraction = voltaic_restoration_settings and voltaic_restoration_settings.toughness_replenish_percent or 0.2
+
+local data_sensor_settings = cryptic_settings.cryptic_ally_coherency_defenses
+local data_sensor_fraction = data_sensor_settings and data_sensor_settings.toughness_percent_to_regen or 0.25
+local data_sensor_cooldown = data_sensor_settings and data_sensor_settings.toughness_cooldown_duration or 15
+
+local overload_settings = cryptic_settings.overload
+local overload_restore_fraction = overload_settings and overload_settings.toughness_percent_restored or 0.2
+
 --- Special rule and buff names the adapters look for.
 local PRECISION_STANCE_RESTORE_RULE = special_rules.cryptic_precision_stance_restores_toughness or "cryptic_precision_stance_restores_toughness"
 local COMBAT_ABILITY_TYPE = "combat_ability"
@@ -101,7 +111,9 @@ end
 
 --- Weapon blessing proc buffs that restore a fixed percentage of Toughness: Confident Strike,
 -- Inspiring Barrage, Reassuringly Accurate, Gloryhunter and Syphon. The set may include weapons
--- a Skitarius cannot equip; their templates simply never proc.
+-- a Skitarius cannot equip; their templates simply never proc. Confident Strike is listed for
+-- completeness, but the pulse module skips its activations and follows the sweeps instead
+-- (`OverflowMeter_chained_hits.lua`).
 local WEAPON_TOUGHNESS_PROC_TEMPLATES = {
     weapon_trait_bespoke_powermaul_p3_toughness_recovery_on_chained_attacks = true,
     weapon_trait_bespoke_arc_rifle_p1_toughness_on_continuous_fire = true,
@@ -376,7 +388,8 @@ local adapters = {
 -- continuous estimate, and `available_max_fraction(ctx)` returns the nominal ceiling. The
 -- remaining fields are pulse inputs for `OverflowMeter_pulses.lua`: the blessing template sets,
 -- restore fractions, Voltaic Overcharge's charge cap and full-charge keyword, the Discharge
--- damage profile and special rule, and the talent buffs that gate the kill and hit pulses.
+-- damage profile and special rule, the talent buffs that gate the kill and hit pulses, Data
+-- Sensor Protocol's cooldown, and the overload keystone's stack buff and restore rule.
 return {
     continuous_when_full = true,
     has_inactive_state = true,
@@ -403,5 +416,16 @@ return {
     discharge_restore_special_rule = special_rules.cryptic_discharge_restores_toughness_on_use or "cryptic_discharge_restores_toughness_on_use",
     weakspot_talent_buff_name = "cryptic_weakspot_kills_restore_toughness",
     dissector_talent_buff_name = "cryptic_dissector",
-    discharge_toughness_talent_buff_name = "cryptic_discharge_toughness"
+    discharge_toughness_talent_buff_name = "cryptic_discharge_toughness",
+
+    voltaic_restoration_fraction = voltaic_restoration_fraction,
+    voltaic_restoration_talent_buff_name = "cryptic_coherency_toughness_on_ability",
+
+    data_sensor_fraction = data_sensor_fraction,
+    data_sensor_cooldown = data_sensor_cooldown,
+    data_sensor_talent_buff_name = "cryptic_ally_coherency_defenses_toughness",
+
+    overload_restore_fraction = overload_restore_fraction,
+    overload_restore_special_rule = special_rules.cryptic_overload_keystone_explosion_restores_toughness_and_stamina or "cryptic_overload_keystone_explosion_restores_toughness_and_stamina",
+    overload_stack_buff_name = "cryptic_overload_keystone_stack"
 }

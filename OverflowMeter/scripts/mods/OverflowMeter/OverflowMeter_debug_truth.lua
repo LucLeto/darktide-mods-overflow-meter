@@ -29,9 +29,18 @@
 -- bar has not moved since an earlier restore it did not show yet; `alt` is the overflow with
 -- what those earlier restores took up subtracted from the bar. Only measured, not counted.
 --
+-- Three diagnostics follow the at-full gaps. Per reason, the game's calls are counted as full
+-- (nothing restored) or partial (clamped in part), with the time each kind covered: the gap to
+-- the reason's previous call, when that was at most `MAX_TICK_GAP` ago. The breakdown sets that
+-- time next to the mod's samples for the label (each covers `SAMPLE_INTERVAL`), which compares
+-- the time at full of the continuous sources. The HUD element reports every sample's missing
+-- Toughness (`record_sample`), bucketed by how far below full the bar was, overall and while a
+-- modelled continuous source ran. And a restore larger than `OUTLIER_FACTOR` times maximum
+-- Toughness is logged at once with its callers, to find where such restores come from.
+--
 -- Loaded by `OverflowMeter.lua` while `DEBUG_TRUTH` is on and stored as `mod._debug_truth`.
--- Remove before release, together with its load line, its three calls there, the `record_mod`
--- calls in `OverflowMeter_pulses_zealot.lua`, `OverflowMeter_pulses_psyker.lua`,
+-- Remove before release, together with its load line, its three calls there, the `record_sample`
+-- calls in the HUD element, the `record_mod` calls in `OverflowMeter_pulses_zealot.lua`, `OverflowMeter_pulses_psyker.lua`,
 -- `OverflowMeter_pulses.lua`, `OverflowMeter_pulses_veteran.lua` and the HUD element, the source
 -- labels passed in `OverflowMeter_pulses.lua` and `OverflowMeter_pulses_veteran.lua` (with the
 -- latter's `continuous_parts`), and the warp profile line in `OverflowMeter_sources_psyker.lua`.
@@ -50,7 +59,9 @@ local next = next
 local pairs = pairs
 local string_find = string.find
 local string_format = string.format
+local table_concat = table.concat
 local table_sort = table.sort
+local tostring = tostring
 local type = type
 
 --- Seconds between the running total lines.
@@ -116,6 +127,24 @@ local ADAPTER_LABELS = {
 --- How far up the call stack the restoring buff function is searched for.
 local MAX_STACK_DEPTH = 16
 
+--- Longest gap between two calls of one reason that still counts as one running source, in
+-- seconds; longer gaps are a new start and cover no time.
+local MAX_TICK_GAP = 1.1
+--- The HUD element's sample interval, the time each of the mod's at-full samples covers.
+local SAMPLE_INTERVAL = 0.25
+--- A restore asking for more than this many times maximum Toughness is logged as an outlier.
+local OUTLIER_FACTOR = 1.5
+--- At most this many outliers are logged per mission; the rest are only counted.
+local MAX_OUTLIER_LOGS = 20
+--- Caller frames logged per outlier, from the hooked function's caller on.
+local OUTLIER_STACK_FIRST = 3
+local OUTLIER_STACK_LAST = 14
+--- Upper bounds of the sample buckets, as fractions of maximum Toughness missing: full (as the
+-- HUD element counts it), below 1 %, below 5 %; anything more is `lower`.
+local BUCKET_FULL = 0.001
+local BUCKET_1 = 0.01
+local BUCKET_5 = 0.05
+
 --- The Telekine Dome's reason, the buff it gives everyone inside, and the key the game's restores
 -- inside the local Psyker's own dome are summed under (not ally support).
 local DOME_REASON = "psyker_sphere"
@@ -133,6 +162,34 @@ local headroom = {}
 local timer = 0
 local reported = false
 
+--- Restores above the outlier size this mission.
+local outliers = 0
+
+--- Sample buckets (`full`, `below_1`, `below_5`, `lower`) over every sample, and over the
+-- samples while a modelled continuous source ran.
+local samples_all = {
+    count = 0,
+    full = 0,
+    below_1 = 0,
+    below_5 = 0,
+    lower = 0
+}
+local samples_continuous = {
+    count = 0,
+    full = 0,
+    below_1 = 0,
+    below_5 = 0,
+    lower = 0
+}
+local SAMPLE_BUCKETS = {
+    samples_all,
+    samples_continuous
+}
+local SAMPLE_BUCKET_LABELS = {
+    "all",
+    "continuous"
+}
+
 --- Missing Toughness at the last restore the server applied before the mod saw it, and what the
 -- restores since the bar last moved took up without the bar showing it yet.
 local last_damage = nil
@@ -140,6 +197,9 @@ local unshown = 0
 
 --- Below this many Toughness points the bar counts as full, and a change as none.
 local EPSILON = 0.5
+--- Below this many Toughness points a call restored nothing. Power Overflow asks for exactly 0,
+-- and per-frame ticks restore far less than `EPSILON`, so this has to be tiny.
+local NOTHING_RESTORED = 1e-4
 
 --- Returns the local player, if any.
 -- treturn: ?tab player
@@ -203,11 +263,66 @@ local function _restoring_template()
     return nil
 end
 
+--- Returns the current gameplay time, or nil before the gameplay timer exists.
+-- treturn: ?number
+local function _now()
+    local time_manager = Managers.time
+
+    if time_manager and time_manager.has_timer and time_manager:has_timer("gameplay") then
+        return time_manager:time("gameplay")
+    end
+
+    return nil
+end
+
+--- Returns the callers of the hooked function as `file:line` frames.
+-- treturn: string
+local function _caller_frames()
+    if not debug_getinfo then
+        return "?"
+    end
+
+    local frames = {}
+
+    for level = OUTLIER_STACK_FIRST, OUTLIER_STACK_LAST do
+        local info = debug_getinfo(level, "Sl")
+
+        if not info then
+            break
+        end
+
+        frames[#frames + 1] = string_format("%s:%s", tostring(info.short_src), tostring(info.currentline))
+    end
+
+    return table_concat(frames, " < ")
+end
+
+--- Logs a restore larger than the outlier size, with its callers, up to the per-mission limit.
+-- tab: toughness_extension the local player's toughness extension
+-- number: amount wanted restore
+-- ?number: recovered_amount what restored the bar
+-- ?string: reason replenish reason
+local function _check_outlier(toughness_extension, amount, recovered_amount, reason)
+    local max_toughness = toughness_extension.max_toughness and toughness_extension:max_toughness()
+
+    if type(max_toughness) ~= "number" or max_toughness <= 0 or amount <= OUTLIER_FACTOR * max_toughness then
+        return
+    end
+
+    outliers = outliers + 1
+
+    if outliers <= MAX_OUTLIER_LOGS then
+        mod:info("[OFM] truth outlier #%d reason=%s amount=%.1f recovered=%.1f max=%.1f (x%.1f) callers: %s", outliers, tostring(reason), amount, type(recovered_amount) == "number" and recovered_amount or 0, max_toughness, amount / max_toughness, _caller_frames())
+    end
+end
+
 -- The game restored, or tried to restore, Toughness on a player unit; sums the local player's.
 mod:hook_safe("PlayerUnitToughnessExtension", "_handle_procs", function (self, amount, recovered_amount, reason)
     if type(amount) ~= "number" or amount <= 0 or self._unit ~= _local_unit() then
         return
     end
+
+    _check_outlier(self, amount, recovered_amount, reason)
 
     local key = reason or "<nil>"
     local split_reasons = reason and _split_reasons()
@@ -230,14 +345,39 @@ mod:hook_safe("PlayerUnitToughnessExtension", "_handle_procs", function (self, a
         entry = {
             calls = 0,
             wanted = 0,
-            recovered = 0
+            recovered = 0,
+            full_calls = 0,
+            partial_calls = 0,
+            full_time = 0,
+            partial_time = 0,
+            active_time = 0,
+            last_t = nil
         }
         reasons[key] = entry
     end
 
+    local recovered = type(recovered_amount) == "number" and recovered_amount or 0
+
     entry.calls = entry.calls + 1
     entry.wanted = entry.wanted + amount
-    entry.recovered = entry.recovered + (type(recovered_amount) == "number" and recovered_amount or 0)
+    entry.recovered = entry.recovered + recovered
+
+    -- Time the reason covered since its previous call, split by how this call was clamped.
+    local now = _now()
+    local last_t = entry.last_t
+    local gap = now and last_t and now - last_t
+    local covered = gap and gap >= 0 and gap <= MAX_TICK_GAP and gap or 0
+
+    entry.last_t = now
+    entry.active_time = entry.active_time + covered
+
+    if recovered < NOTHING_RESTORED then
+        entry.full_calls = entry.full_calls + 1
+        entry.full_time = entry.full_time + covered
+    elseif recovered < amount - NOTHING_RESTORED then
+        entry.partial_calls = entry.partial_calls + 1
+        entry.partial_time = entry.partial_time + covered
+    end
 end)
 
 --- Returns the game's totals in the mod's definitions.
@@ -313,6 +453,37 @@ Truth.record_mod = function (source, wanted, overflowed)
     entry.events = entry.events + 1
     entry.wanted = entry.wanted + wanted
     entry.overflowed = entry.overflowed + overflowed
+end
+
+--- Adds one sample's bar state to its bucket, overall and while a continuous source ran.
+-- number: damage missing Toughness at the sample
+-- number: max_toughness maximum Toughness
+-- ?bool: continuous_active whether a modelled continuous source ran
+Truth.record_sample = function (damage, max_toughness, continuous_active)
+    if type(damage) ~= "number" or type(max_toughness) ~= "number" or max_toughness <= 0 then
+        return
+    end
+
+    local fraction = damage / max_toughness
+    local bucket
+
+    if fraction <= BUCKET_FULL then
+        bucket = "full"
+    elseif fraction < BUCKET_1 then
+        bucket = "below_1"
+    elseif fraction < BUCKET_5 then
+        bucket = "below_5"
+    else
+        bucket = "lower"
+    end
+
+    samples_all.count = samples_all.count + 1
+    samples_all[bucket] = samples_all[bucket] + 1
+
+    if continuous_active then
+        samples_continuous.count = samples_continuous.count + 1
+        samples_continuous[bucket] = samples_continuous[bucket] + 1
+    end
 end
 
 --- Adds how the bar looked when a restore the server already applied reached the mod.
@@ -422,6 +593,12 @@ Truth.reset = function ()
     reported = false
     last_damage = nil
     unshown = 0
+    outliers = 0
+
+    for key in pairs(samples_all) do
+        samples_all[key] = 0
+        samples_continuous[key] = 0
+    end
 end
 
 --- Logs the running totals once a minute while anything was recorded.
@@ -460,18 +637,35 @@ local function _report_headroom()
     mod:info("[OFM] headroom all events=%d stacked=%d overflowed old=%.1f new=%.1f alt=%.1f", events, stacked, old_overflowed, new_overflowed, alt_overflowed)
 end
 
+--- Logs the sample buckets, each with its share of the samples.
+local function _report_samples()
+    for i = 1, 2 do
+        local bucket = SAMPLE_BUCKETS[i]
+        local count = bucket.count
+
+        if count > 0 then
+            mod:info("[OFM] samples %s count=%d (%.1fs) full=%d (%.1f%%) below1%%=%d (%.1f%%) below5%%=%d (%.1f%%) lower=%d (%.1f%%)", SAMPLE_BUCKET_LABELS[i], count, count * SAMPLE_INTERVAL, bucket.full, 100 * bucket.full / count, bucket.below_1, 100 * bucket.below_1 / count, bucket.below_5, 100 * bucket.below_5 / count, bucket.lower, 100 * bucket.lower / count)
+        end
+    end
+end
+
 --- Logs the bar states, and when hosting the per-reason breakdown and the totals with a comparison
 -- line in the local chat; once per mission and only if anything was recorded.
 Truth.report = function ()
     local has_game = next(reasons) ~= nil
 
-    if reported or (not has_game and next(headroom) == nil) then
+    if reported or (not has_game and next(headroom) == nil and samples_all.count == 0) then
         return
     end
 
     reported = true
 
     _report_headroom()
+    _report_samples()
+
+    if outliers > 0 then
+        mod:info("[OFM] truth outliers=%d (above %.1fx maximum Toughness; first %d logged)", outliers, OUTLIER_FACTOR, MAX_OUTLIER_LOGS)
+    end
 
     if not has_game then
         return
@@ -494,6 +688,10 @@ Truth.report = function ()
         local mod_part = mod_events and string_format("mod events=%d wanted=%.1f overflowed=%.1f", mod_events, mod_wanted, mod_overflowed) or "mod -"
 
         mod:info("[OFM] truth reason=%s calls=%d wanted=%.1f recovered=%.1f overflowed=%.1f%s | %s", key, entry.calls, entry.wanted, entry.recovered, entry.wanted - entry.recovered, ALLY_REASONS[key] and " (ally)" or "", mod_part)
+
+        if entry.full_calls > 0 or entry.partial_calls > 0 then
+            mod:info("[OFM] truth   time reason=%s game full=%d calls (%.1fs) partial=%d calls (%.1fs) running=%.1fs | mod samples=%d (%.1fs)", key, entry.full_calls, entry.full_time, entry.partial_calls, entry.partial_time, entry.active_time, mod_events or 0, (mod_events or 0) * SAMPLE_INTERVAL)
+        end
     end
 
     local tagged_overflowed = 0

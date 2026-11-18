@@ -3,16 +3,17 @@
 -- fills the replicated bar, which misses the part clamped at the cap and everything at full.
 -- This module infers that part from client-side events: kills in local attack reports (melee,
 -- Out for Blood, Exhilarating Takedown, Confirmed Kill and Target Down!), weapon blessing procs,
--- Voice of Command and Infiltrate, and On Your Toes weapon swaps. It also models when the
--- continuous at-full sources run (Executioner's Stance, Catch a Breath and Confirmed Kill's
--- regeneration), because their server-side buffs are not reliably visible to the client.
+-- Confident Strike's chained hits, Voice of Command and Infiltrate, and On Your Toes weapon swaps.
+-- It also models when the continuous at-full sources run (Executioner's Stance, Catch a Breath
+-- and Confirmed Kill's regeneration), because their server-side buffs are not reliably visible to
+-- the client.
 --
 -- The HUD element drains three queues every sample: `pending_excess`, the clamped excess of
 -- discrete restores; `pending_burst_share`, the share each ally gets from a shout; and
 -- `pending_burst_overflow`, the shout's clamped excess. All are in Toughness points.
 --
 -- Explicit module loaded by `OverflowMeter.lua` and stored as `mod._pulses_veteran`.
--- `on_proc_active` and `on_attack_result` are called from the shared hooks in
+-- `on_proc_active`, `on_proc_event` and `on_attack_result` are called from the shared hooks in
 -- `OverflowMeter.lua`; the combat ability, weapon swap and smart tag hooks are registered here.
 -- `set_context` enables it for the local player's unit, and it ignores every event while
 -- disabled.
@@ -21,7 +22,9 @@
 -- author: LucLeto
 local mod = get_mod("OverflowMeter")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
+local BuffSettings = require("scripts/settings/buff/buff_settings")
 local Sources = mod._sources_veteran
+local ChainedHits = mod._chained_hits
 
 local ScriptUnit = ScriptUnit
 local Managers = Managers
@@ -30,6 +33,7 @@ local math_min = math.min
 local ATTACK_RESULT_DIED = AttackSettings.attack_results.died
 local ATTACK_TYPE_MELEE = AttackSettings.attack_types.melee
 local ATTACK_TYPE_RANGED = AttackSettings.attack_types.ranged
+local PROC_EVENT_SWEEP_FINISH = BuffSettings.proc_events and BuffSettings.proc_events.on_sweep_finish or "on_sweep_finish"
 
 --- TEMPORARY: labels of the counted sources for the solo-play comparison, matching the game's
 -- reason, or the reason and the buff template that restored where several talents share one.
@@ -57,6 +61,7 @@ local Pulses = {
     toughness_extension = nil,
     unit_data_extension = nil,
     disabled_component = nil,
+    inventory_component = nil,
     has_out_for_blood = false,
     has_confirmed_kill = false,
     has_exhilarating = false,
@@ -106,21 +111,28 @@ local function _has_special_rule(talent_extension, rule_name)
 end
 
 --- Enables the module for the local player's unit, caches its extensions and talent flags and
--- restarts every timer.
+-- restarts every timer. The HUD element calls it again every second while supported, so the
+-- Confident Strike chain only restarts when the module was disabled or the unit changed.
 -- param: unit local player unit
 -- tab: buff_extension its buff extension
 -- tab: toughness_extension its toughness extension
 -- ?tab: talent_extension its talent extension
 Pulses.set_context = function(unit, buff_extension, toughness_extension, talent_extension)
+    if not (Pulses.enabled and Pulses.unit == unit) then
+        ChainedHits.reset()
+    end
+
     Pulses.enabled = true
     Pulses.unit = unit
     Pulses.buff_extension = buff_extension
     Pulses.toughness_extension = toughness_extension
 
     local unit_data_extension = ScriptUnit.has_extension(unit, "unit_data_system")
+    local can_read = unit_data_extension and unit_data_extension.read_component
 
     Pulses.unit_data_extension = unit_data_extension
-    Pulses.disabled_component = unit_data_extension and unit_data_extension.read_component and unit_data_extension:read_component("disabled_character_state")
+    Pulses.disabled_component = can_read and unit_data_extension:read_component("disabled_character_state")
+    Pulses.inventory_component = can_read and unit_data_extension:read_component("inventory")
     Pulses.has_out_for_blood = _has_talent_buff(talent_extension, Sources.out_for_blood_talent_buff_name)
     Pulses.has_confirmed_kill = _has_talent_buff(talent_extension, Sources.confirmed_kill_talent_buff_name)
     Pulses.has_exhilarating = _has_talent_buff(talent_extension, Sources.exhilarating_talent_buff_name)
@@ -141,6 +153,8 @@ end
 
 --- Disables the module and clears every queue, cached reference, talent flag and timer.
 Pulses.disable = function()
+    ChainedHits.reset()
+
     Pulses.enabled = false
     Pulses.pending_excess = 0
     Pulses.pending_burst_share = 0
@@ -150,6 +164,7 @@ Pulses.disable = function()
     Pulses.toughness_extension = nil
     Pulses.unit_data_extension = nil
     Pulses.disabled_component = nil
+    Pulses.inventory_component = nil
     Pulses.has_out_for_blood = false
     Pulses.has_confirmed_kill = false
     Pulses.has_exhilarating = false
@@ -460,7 +475,7 @@ end
 --- Records a weapon blessing proc of the local player.
 -- The fixed percentage comes from the blessing tier's override data, or else the template.
 -- Continuous fire multiplies it by the fire step, at most 5. Blessing restores ignore Toughness
--- stat buffs.
+-- stat buffs. Confident Strike's activations are skipped: its restores come from the sweeps.
 -- tab: buff_extension buff extension whose proc became active
 -- ?int: index index of the buff instance
 Pulses.on_proc_active = function(buff_extension, index)
@@ -476,7 +491,7 @@ Pulses.on_proc_active = function(buff_extension, index)
 
     local template_name = buff_instance:template_name()
 
-    if not Sources.weapon_toughness_proc_templates[template_name] then
+    if not Sources.weapon_toughness_proc_templates[template_name] or ChainedHits.templates[template_name] then
         return
     end
 
@@ -500,6 +515,30 @@ Pulses.on_proc_active = function(buff_extension, index)
     end
 
     _add_pulse(fixed_percentage, false, SOURCE_BLESSING)
+end
+
+--- Records Confident Strike's restore when a finished melee sweep gives one.
+-- The sweep event comes before the game applies the restore, so the bar is current for it.
+-- Sweeps while the unit re-simulates after a misprediction were counted the first time.
+-- tab: buff_extension buff extension the event was queued for
+-- string: event proc event name
+-- ?tab: params event parameters
+Pulses.on_proc_event = function(buff_extension, event, params)
+    if not Pulses.enabled or buff_extension ~= Pulses.buff_extension or event ~= PROC_EVENT_SWEEP_FINISH then
+        return
+    end
+
+    local unit_data_extension = Pulses.unit_data_extension
+
+    if unit_data_extension and unit_data_extension.is_resimulating then
+        return
+    end
+
+    local fraction = ChainedHits.on_sweep_finish(buff_extension, params, Pulses.inventory_component)
+
+    if fraction then
+        _add_pulse(fraction, false, SOURCE_BLESSING)
+    end
 end
 
 --- Records what one attack report means for the Veteran's restores and timers.

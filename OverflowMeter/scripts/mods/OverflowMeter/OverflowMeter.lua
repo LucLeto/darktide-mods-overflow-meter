@@ -4,9 +4,9 @@
 --
 -- Every setting is cached in `mod._settings` and refreshed per changed id. The modules are
 -- loaded in dependency order through `mod:io_dofile` and stored on `mod`: the mission
--- statistics, the Skitarii, Veteran, Zealot and Psyker sources and pulses with the check for
--- refused replenishes, the scoreboard snapshot with its optional adapters, mission summary
--- sharing and the Session Stats rows. The HUD element (`ui/OverflowMeter_hud_element.lua`) is
+-- statistics, the check for refused replenishes and the Confident Strike chain the pulse modules
+-- share, the Skitarii, Veteran, Zealot and Psyker sources and pulses, the scoreboard snapshot with
+-- its optional adapters, mission summary sharing and the Session Stats rows. The HUD element (`ui/OverflowMeter_hud_element.lua`) is
 -- registered last and reaches everything through these `mod` fields.
 --
 -- DMF keeps only one hook per mod and method, so the hooks several pulse modules need
@@ -188,11 +188,12 @@ end
 -- Loaded in dependency order: the pulse modules read their sources from `mod`, and the
 -- snapshot reads the statistics.
 mod._stats = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_stats")
+mod._blocked_replenish = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_blocked_replenish")
+mod._chained_hits = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_chained_hits")
 mod._sources = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources")
 mod._pulses = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses")
 mod._sources_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_veteran")
 mod._pulses_veteran = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_veteran")
-mod._blocked_replenish = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_blocked_replenish")
 mod._sources_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_zealot")
 mod._pulses_zealot = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_pulses_zealot")
 mod._sources_psyker = mod:io_dofile("OverflowMeter/scripts/mods/OverflowMeter/OverflowMeter_sources_psyker")
